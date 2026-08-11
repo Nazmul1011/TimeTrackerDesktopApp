@@ -1,0 +1,5 @@
+/**
+ * Repository layer for local SQLite persistence.
+ * Empty folder — repositories will be added per domain (timer, activity, etc.).
+ */
+export {};
