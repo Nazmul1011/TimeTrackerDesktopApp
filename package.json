@@ -5,14 +5,16 @@
   "private": true,
   "main": "dist-electron/main/index.js",
   "scripts": {
-    "dev": "next dev",
+    "dev": "npm run electron:dev",
+    "dev:web": "next dev",
+    "start": "npm run electron:dev",
     "build": "next build",
     "lint": "eslint . --ext .ts,.tsx --max-warnings 0",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,md,yml,yaml}\"",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "electron:compile": "tsc -p tsconfig.electron.json",
     "electron": "npm run electron:compile && env -u ELECTRON_RUN_AS_NODE electron . --no-sandbox",
-    "electron:dev": "npm run electron:compile && concurrently -k \"next dev\" \"wait-on tcp:3000 && env -u ELECTRON_RUN_AS_NODE electron . --no-sandbox\"",
+    "electron:dev": "npm run electron:compile && concurrently -k -n next,electron -c blue,magenta \"next dev -p 3000\" \"wait-on tcp:3000 && env -u ELECTRON_RUN_AS_NODE electron . --no-sandbox\"",
     "electron:build": "npm run build && npm run electron:compile && env -u ELECTRON_RUN_AS_NODE electron-builder",
     "prepare": "husky || true"
   },

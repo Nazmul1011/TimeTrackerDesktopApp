@@ -24,6 +24,25 @@ const electronAPI = {
     capture: () => ipcRenderer.invoke("screenshot:capture"),
     list: () => ipcRenderer.invoke("screenshot:list"),
   },
+  // Main-process tracking agent (screenshots while timer runs)
+  tracking: {
+    start: (payload: unknown) => ipcRenderer.invoke("tracking:start", payload),
+    stop: () => ipcRenderer.invoke("tracking:stop"),
+    updateAuth: (payload: unknown) =>
+      ipcRenderer.invoke("tracking:updateAuth", payload),
+    captureNow: () => ipcRenderer.invoke("tracking:captureNow"),
+    status: () => ipcRenderer.invoke("tracking:status"),
+    onUploaded: (callback: (payload: unknown) => void) => {
+      const listener = (_event: unknown, payload: unknown) => callback(payload);
+      ipcRenderer.on("screenshot:uploaded", listener);
+      return () => ipcRenderer.removeListener("screenshot:uploaded", listener);
+    },
+    onFailed: (callback: (payload: unknown) => void) => {
+      const listener = (_event: unknown, payload: unknown) => callback(payload);
+      ipcRenderer.on("screenshot:failed", listener);
+      return () => ipcRenderer.removeListener("screenshot:failed", listener);
+    },
+  },
   // Activity
   activity: {
     getIdleState: (thresholdSeconds?: number) =>

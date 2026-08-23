@@ -1,8 +1,11 @@
 /**
- * Timer Zustand store — local ticking hydrated from backend elapsedSeconds.
+ * Timer Zustand store — session ticking + today's logged total.
+ * Display = todayLoggedMs + session elapsed (while running/paused).
+ * Resets today's total at local midnight.
  */
 import { create } from "zustand";
 import type { ApiTimer } from "@/services/api/types";
+import { toIsoDate } from "@/services/api/timesheet.api";
 import type { Timer, TimerStatus } from "@/types";
 
 interface TimerState {
@@ -11,6 +14,10 @@ interface TimerState {
   segmentStartedAt: number | null;
   /** Elapsed ms accumulated before the current running segment */
   baseElapsedMs: number;
+  /** Completed time entries for today (ms) — survives stop until day ends */
+  todayLoggedMs: number;
+  /** Local calendar day for todayLoggedMs */
+  todayDate: string;
   isSyncing: boolean;
   setDescription: (description: string) => void;
   setProject: (projectId: string | null) => void;
@@ -20,10 +27,14 @@ interface TimerState {
     status: TimerStatus,
     partial?: Partial<Timer>,
   ) => void;
-  setIdle: (elapsedMs?: number) => void;
+  setIdle: () => void;
+  setTodayLoggedSeconds: (seconds: number) => void;
+  ensureToday: () => void;
   setSyncing: (isSyncing: boolean) => void;
   tick: () => void;
   reset: () => void;
+  /** Session + today total for the big clock */
+  getDisplayMs: () => number;
 }
 
 const initialTimer: Timer = {
@@ -68,6 +79,8 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   timer: initialTimer,
   segmentStartedAt: null,
   baseElapsedMs: 0,
+  todayLoggedMs: 0,
+  todayDate: toIsoDate(),
   isSyncing: false,
 
   setDescription: (description) =>
@@ -78,8 +91,9 @@ export const useTimerStore = create<TimerState>((set, get) => ({
 
   hydrateFromApi: (apiTimer) => {
     if (!apiTimer) {
+      // Idle — keep today's logged total, clear only the live session
       set({
-        timer: initialTimer,
+        timer: { ...initialTimer, elapsedMs: 0 },
         segmentStartedAt: null,
         baseElapsedMs: 0,
       });
@@ -104,15 +118,29 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     });
   },
 
-  setIdle: (elapsedMs = 0) => {
+  setIdle: () => {
     set({
       segmentStartedAt: null,
-      baseElapsedMs: elapsedMs,
+      baseElapsedMs: 0,
       timer: {
         ...initialTimer,
-        elapsedMs,
+        elapsedMs: 0,
       },
     });
+  },
+
+  setTodayLoggedSeconds: (seconds) => {
+    get().ensureToday();
+    set({
+      todayLoggedMs: Math.max(0, seconds) * 1000,
+      todayDate: toIsoDate(),
+    });
+  },
+
+  ensureToday: () => {
+    const today = toIsoDate();
+    if (get().todayDate === today) return;
+    set({ todayDate: today, todayLoggedMs: 0 });
   },
 
   setSyncing: (isSyncing) => set({ isSyncing }),
@@ -120,6 +148,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   tick: () => {
     const { timer, segmentStartedAt, baseElapsedMs } = get();
     if (timer.status !== "running" || !segmentStartedAt) return;
+    get().ensureToday();
     set({
       timer: {
         ...timer,
@@ -128,11 +157,23 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     });
   },
 
+  getDisplayMs: () => {
+    const state = get();
+    state.ensureToday();
+    const sessionMs =
+      state.timer.status === "running" || state.timer.status === "paused"
+        ? state.timer.elapsedMs
+        : 0;
+    return state.todayLoggedMs + sessionMs;
+  },
+
   reset: () =>
     set({
       timer: initialTimer,
       segmentStartedAt: null,
       baseElapsedMs: 0,
+      todayLoggedMs: 0,
+      todayDate: toIsoDate(),
       isSyncing: false,
     }),
 }));

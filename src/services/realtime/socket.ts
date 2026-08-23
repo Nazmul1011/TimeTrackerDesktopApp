@@ -1,15 +1,20 @@
 /**
- * Socket.IO realtime client for timer events.
+ * Socket.IO realtime client for timer events (web ↔ desktop).
+ * Listens to both `timer:event` and `timer-event` names.
  */
 import { io, type Socket } from "socket.io-client";
 import { STORAGE_KEYS } from "@/constants/storage";
 import type { ApiTimer } from "@/services/api/types";
+import { dispatchTimerStopped } from "@/lib/timer-events";
 import { useTimerStore } from "@/store/timer.store";
+import { useAuthStore } from "@/store/auth.store";
 
 type TimerEventPayload = {
+  userId?: string;
   timer?: ApiTimer;
-  entries?: unknown[];
+  entries?: Array<{ duration?: number | null }>;
   count?: number;
+  totalDurationSeconds?: number;
 };
 
 let socket: Socket | null = null;
@@ -22,13 +27,39 @@ function getSocketUrl(): string {
   return base.replace(/\/$/, "");
 }
 
+function isOwnEvent(payload: TimerEventPayload): boolean {
+  const myId = useAuthStore.getState().user?.id;
+  if (!payload.userId || !myId) return true;
+  return payload.userId === myId;
+}
+
 function applyTimerPayload(payload: TimerEventPayload | null | undefined) {
+  if (payload && !isOwnEvent(payload)) return;
   const store = useTimerStore.getState();
   if (!payload?.timer) {
-    store.setIdle(0);
+    store.setIdle();
     return;
   }
   store.hydrateFromApi(payload.timer);
+}
+
+function savedSeconds(payload: TimerEventPayload): number {
+  if (payload.totalDurationSeconds != null) {
+    return payload.totalDurationSeconds;
+  }
+  return (
+    payload.entries?.reduce((sum, entry) => sum + (entry.duration ?? 0), 0) ?? 0
+  );
+}
+
+function bind(
+  active: Socket,
+  names: string[],
+  handler: (payload: TimerEventPayload) => void,
+) {
+  for (const name of names) {
+    active.on(name, handler);
+  }
 }
 
 export function connectRealtime(options?: {
@@ -60,20 +91,32 @@ export function connectRealtime(options?: {
     },
   });
 
-  socket.on("timer:started", (payload: TimerEventPayload) => {
+  bind(socket, ["timer:started", "timer-started"], (payload) => {
     applyTimerPayload(payload);
   });
-  socket.on("timer:paused", (payload: TimerEventPayload) => {
+  bind(socket, ["timer:paused", "timer-paused"], (payload) => {
     applyTimerPayload(payload);
   });
-  socket.on("timer:resumed", (payload: TimerEventPayload) => {
+  bind(socket, ["timer:resumed", "timer-resumed"], (payload) => {
     applyTimerPayload(payload);
   });
-  socket.on("timer:synced", (payload: TimerEventPayload) => {
+  bind(socket, ["timer:synced", "timer-synced"], (payload) => {
     applyTimerPayload(payload);
   });
-  socket.on("timer:stopped", () => {
-    useTimerStore.getState().setIdle(0);
+  bind(socket, ["timer:stopped", "timer-stopped"], (payload) => {
+    if (!isOwnEvent(payload)) return;
+    const saved = savedSeconds(payload);
+    const previous = useTimerStore.getState().todayLoggedMs;
+    useTimerStore.getState().setIdle();
+    if (saved > 0) {
+      useTimerStore
+        .getState()
+        .setTodayLoggedSeconds(previous / 1000 + saved);
+    }
+    dispatchTimerStopped({
+      totalDurationSeconds: saved,
+      entryCount: payload.count ?? payload.entries?.length ?? 0,
+    });
   });
 
   return socket;

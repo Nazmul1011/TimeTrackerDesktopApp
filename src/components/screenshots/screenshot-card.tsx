@@ -1,5 +1,5 @@
 /**
- * Screenshot card — gradient preview + delete request.
+ * Screenshot card — real image preview + delete request.
  */
 "use client";
 
@@ -12,7 +12,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import type { ScreenshotItem } from "@/constants/demo-data";
+
+export type ScreenshotItem = {
+  id: string;
+  timeLabel: string;
+  capturedAt: string;
+  imageUrl?: string | null;
+  appName?: string | null;
+  deleteRequested?: boolean;
+};
 
 interface ScreenshotCardProps {
   item: ScreenshotItem;
@@ -21,18 +29,43 @@ interface ScreenshotCardProps {
 
 export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
   const [showDelete, setShowDelete] = useState(false);
+  const [imgFailed, setImgFailed] = useState(false);
 
   return (
     <div className="relative overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-white p-1">
-      <button
-        type="button"
-        className="relative block aspect-[179/106] w-full overflow-hidden rounded-lg"
-        style={{ background: item.gradient }}
+      <div
+        role="button"
+        tabIndex={0}
+        className="relative block aspect-[179/106] w-full cursor-pointer overflow-hidden rounded-lg bg-[var(--surface-elevated)]"
         onClick={() => setShowDelete((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setShowDelete((v) => !v);
+          }
+        }}
         aria-label={`Screenshot at ${item.timeLabel}`}
       >
+        {item.imageUrl && !imgFailed ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={item.imageUrl}
+            alt={item.appName || "Screenshot"}
+            className="size-full object-cover"
+            onError={() => setImgFailed(true)}
+          />
+        ) : (
+          <div className="flex size-full items-center justify-center bg-gradient-to-br from-slate-200 to-slate-300 text-[10px] text-slate-500">
+            No preview
+          </div>
+        )}
+
         {showDelete && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/20 p-2">
+          <div
+            className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/40 p-2"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
             <div className="max-w-[90%] rounded-md bg-black px-2 py-1.5 text-center text-[10px] leading-tight text-white">
               Request deletion for personal content, admin reviews before removing permanently.
             </div>
@@ -40,8 +73,7 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
               variant="outline"
               size="sm"
               className="h-8 border-red-400 bg-white text-xs text-red-500 hover:bg-red-50 hover:text-red-600"
-              onClick={(e) => {
-                e.stopPropagation();
+              onClick={() => {
                 onRequestDelete?.(item.id);
                 setShowDelete(false);
                 toast.success("Deletion request submitted for admin review");
@@ -51,10 +83,15 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
             </Button>
           </div>
         )}
-      </button>
+      </div>
 
       <div className="flex items-center justify-between px-1 py-1">
-        <span className="text-xs text-[var(--text-subtle)]">{item.timeLabel}</span>
+        <div className="min-w-0">
+          <span className="text-xs text-[var(--text-subtle)]">{item.timeLabel}</span>
+          {item.appName ? (
+            <p className="truncate text-[10px] text-[var(--text-muted)]">{item.appName}</p>
+          ) : null}
+        </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button type="button" className="outline-none" aria-label="Screenshot menu">
@@ -64,9 +101,13 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => setShowDelete(true)}>Request to delete</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => toast.message("Open fullscreen coming soon")}>
-              View
-            </DropdownMenuItem>
+            {item.imageUrl ? (
+              <DropdownMenuItem
+                onClick={() => window.open(item.imageUrl!, "_blank", "noopener,noreferrer")}
+              >
+                View
+              </DropdownMenuItem>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

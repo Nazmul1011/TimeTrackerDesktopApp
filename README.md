@@ -19,19 +19,22 @@ Enterprise-ready Electron + Next.js desktop application for time tracking and HR
 ## Getting Started
 
 ```bash
-cd desktop
+cd TimeTrackerDesktopApp
 cp .env.example .env
 npm install
-npm run electron:dev
+npm run dev
 ```
+
+This starts Next.js in the background and opens the **Electron desktop window** (~446×640). Do not open `http://localhost:3000` in a browser for normal use — activity tracking and screenshots only work inside Electron.
 
 ### Scripts
 
 | Script | Description |
 | --- | --- |
-| `npm run dev` | Next.js renderer only |
-| `npm run electron:dev` | Next.js + Electron together |
-| `npm run electron` | Launch Electron against built main process |
+| `npm run dev` / `npm start` | **Desktop app** — Next.js + Electron window |
+| `npm run dev:web` | Next.js renderer only (browser debugging) |
+| `npm run electron:dev` | Same as `dev` |
+| `npm run electron` | Launch Electron against compiled main process |
 | `npm run build` | Build Next.js renderer |
 | `npm run electron:build` | Package desktop installers |
 | `npm run lint` | ESLint |

@@ -18,6 +18,13 @@ export type DeviceTimerPayload = {
   deviceId?: string;
 };
 
+export type StopTimerResult = {
+  userId?: string;
+  entries?: Array<{ duration?: number | null }>;
+  count?: number;
+  totalDurationSeconds?: number;
+};
+
 export const timerApi = {
   async start(payload: StartTimerPayload = {}) {
     const { data } = await apiClient.post<ApiResponse<{ timer: ApiTimer }>>(
@@ -31,10 +38,11 @@ export const timerApi = {
   },
 
   async stop(payload: StopTimerPayload = {}) {
-    const { data } = await apiClient.post<
-      ApiResponse<{ entries: unknown[]; count: number }>
-    >("/timer/stop", payload);
-    return data.data;
+    const { data } = await apiClient.post<ApiResponse<StopTimerResult>>(
+      "/timer/stop",
+      payload,
+    );
+    return data.data ?? { entries: [], count: 0, totalDurationSeconds: 0 };
   },
 
   async pause(payload: DeviceTimerPayload = {}) {

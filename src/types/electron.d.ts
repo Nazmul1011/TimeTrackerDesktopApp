@@ -37,6 +37,39 @@ export interface ElectronAPI {
     }>;
     list: () => Promise<unknown>;
   };
+  tracking: {
+    start: (payload: {
+      accessToken: string;
+      organizationId: string;
+      deviceId: string;
+      sessionToken?: string | null;
+      apiBaseUrl: string;
+      screenshotIntervalMs?: number;
+      enableScreenshots?: boolean;
+      firstScreenshotDelayMs?: number;
+    }) => Promise<{ ok: boolean; intervalMs?: number; message?: string }>;
+    stop: () => Promise<{ ok: boolean }>;
+    updateAuth: (payload: {
+      accessToken?: string;
+      organizationId?: string;
+      deviceId?: string;
+      sessionToken?: string | null;
+      apiBaseUrl?: string;
+    }) => Promise<{ ok: boolean }>;
+    captureNow: () => Promise<{
+      ok: boolean;
+      message?: string;
+      id?: string;
+      url?: string;
+    }>;
+    status: () => Promise<{ running: boolean }>;
+    onUploaded: (
+      callback: (payload: { id?: string; url?: string }) => void,
+    ) => () => void;
+    onFailed: (
+      callback: (payload: { message?: string }) => void,
+    ) => () => void;
+  };
   notification: {
     show: (payload: unknown) => Promise<unknown>;
     list: () => Promise<unknown>;

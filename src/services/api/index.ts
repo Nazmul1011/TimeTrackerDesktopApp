@@ -9,4 +9,5 @@ export { activityApi } from "./activity.api";
 export { screenshotApi } from "./screenshot.api";
 export { monitoringApi } from "./monitoring.api";
 export { projectsApi } from "./projects.api";
+export { timesheetApi } from "./timesheet.api";
 export type * from "./types";

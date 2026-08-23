@@ -10,6 +10,7 @@ import { registerActivityIpc } from "./activity";
 import { registerNotificationIpc } from "./notification";
 import { registerSettingsIpc } from "./settings";
 import { registerSyncIpc } from "./sync";
+import { registerTrackingIpc } from "./tracking";
 
 export function registerIpcHandlers(): void {
   registerAuthIpc();
@@ -19,5 +20,6 @@ export function registerIpcHandlers(): void {
   registerNotificationIpc();
   registerSettingsIpc();
   registerSyncIpc();
+  registerTrackingIpc();
   log.info("[ipc] All IPC handlers registered");
 }

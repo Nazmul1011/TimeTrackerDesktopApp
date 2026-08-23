@@ -38,13 +38,14 @@ export function createMainWindow(): BrowserWindow {
 
   const isDev = !app.isPackaged;
   const rendererUrl = process.env.ELECTRON_RENDERER_URL || "http://localhost:3000";
+  const startUrl = `${rendererUrl.replace(/\/$/, "")}/home`;
 
   if (isDev) {
-    log.info(`[window] Loading renderer: ${rendererUrl}`);
-    void win.loadURL(rendererUrl);
+    log.info(`[window] Loading renderer: ${startUrl}`);
+    void win.loadURL(startUrl);
   } else {
     // Production: load Next.js export / local server path (placeholder)
-    void win.loadURL(rendererUrl);
+    void win.loadURL(startUrl);
   }
 
   return win;

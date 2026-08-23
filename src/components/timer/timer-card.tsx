@@ -28,6 +28,7 @@ export function TimerCard() {
   const {
     timer,
     display,
+    todayLoggedMs,
     isRunning,
     isPaused,
     isIdle,
@@ -98,7 +99,7 @@ export function TimerCard() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {(isRunning || isPaused || timer.elapsedMs > 0) && (
+        {(isRunning || isPaused || todayLoggedMs > 0 || timer.elapsedMs > 0) && (
           <div className="flex items-center gap-0.5 rounded-md bg-[var(--surface-elevated)] py-0 pl-0.5 pr-1">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/figma/icon-dot.svg" alt="" className="size-3" width={12} height={12} />
@@ -116,6 +117,9 @@ export function TimerCard() {
         <p className="text-[32px] font-medium leading-[34px] tracking-wide text-black tabular-nums">
           {display}
         </p>
+        {isIdle && todayLoggedMs > 0 && (
+          <p className="text-[11px] text-[var(--text-muted)]">Today&apos;s total</p>
+        )}
 
         {isIdle && (
           <Button
