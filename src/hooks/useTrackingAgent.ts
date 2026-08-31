@@ -6,6 +6,7 @@
 
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
+import { normalizeAppName } from "@/lib/app-name";
 import { activityApi } from "@/services/api/activity.api";
 import { authApi } from "@/services/api/auth.api";
 import { monitoringApi, type MonitoringConfig } from "@/services/api/monitoring.api";
@@ -354,7 +355,7 @@ export function useTrackingAgent() {
           const durationSec = Math.max(1, Math.round((now - prev.at) / 1000));
           queueRef.current.push({
             timestamp: new Date(prev.at).toISOString(),
-            appName: prev.appName || "Desktop",
+            appName: normalizeAppName(prev.appName),
             windowTitle: prev.windowTitle || undefined,
             duration: durationSec,
             isIdle: prev.isIdle,
@@ -363,7 +364,7 @@ export function useTrackingAgent() {
         }
 
         lastSampleRef.current = {
-          appName: win.appName || "Desktop",
+          appName: normalizeAppName(win.appName),
           windowTitle: win.windowTitle || "",
           isIdle: idle.idle,
           at: now,

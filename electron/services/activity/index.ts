@@ -75,8 +75,10 @@ export class ActivityService {
           ["-id", windowId, "WM_CLASS"],
           { timeout: 1500 },
         );
+        // WM_CLASS is "instance", "class" — prefer instance (e.g. google-chrome)
         const match = classOut.match(/"([^"]+)"\s*,\s*"([^"]+)"/);
-        if (match?.[2]) appName = match[2];
+        if (match?.[1]) appName = match[1];
+        else if (match?.[2]) appName = match[2];
       } catch {
         // ignore
       }
