@@ -6,6 +6,7 @@
 import { create } from "zustand";
 import type { ApiTimer } from "@/services/api/types";
 import { toIsoDate } from "@/services/api/timesheet.api";
+import { sanitizeProjectId } from "@/lib/project";
 import type { Timer, TimerStatus } from "@/types";
 
 interface TimerState {
@@ -86,8 +87,13 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   setDescription: (description) =>
     set((s) => ({ timer: { ...s.timer, description } })),
 
-  setProject: (projectId) =>
-    set((s) => ({ timer: { ...s.timer, projectId } })),
+  setProject: (projectId) => {
+    const next =
+      projectId == null || projectId === ""
+        ? null
+        : sanitizeProjectId(projectId) ?? null;
+    set((s) => ({ timer: { ...s.timer, projectId: next } }));
+  },
 
   hydrateFromApi: (apiTimer) => {
     if (!apiTimer) {

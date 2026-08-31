@@ -12,7 +12,7 @@ interface SettingsState {
 
 const defaultSettings: Settings = {
   theme: "system",
-  screenshotIntervalMinutes: 10,
+  screenshotIntervalMinutes: 5,
   idleTimeoutMinutes: 5,
   autoStartOnLogin: false,
   notificationsEnabled: true,

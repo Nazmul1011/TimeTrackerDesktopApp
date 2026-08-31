@@ -1,15 +1,15 @@
 /**
- * Timesheet row — Figma list item.
+ * Timesheet row — Figma list item (17623:47865 / 17623:48056 / 17623:48009).
  */
 "use client";
 
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { FigmaGlyph } from "@/components/icons/figma-glyph";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -19,6 +19,8 @@ interface TimesheetRowProps {
   duration: string;
   isActive?: boolean;
   unlinked?: boolean;
+  showMenu?: boolean;
+  compact?: boolean;
   onPlay?: () => void;
 }
 
@@ -28,61 +30,75 @@ export function TimesheetRow({
   duration,
   isActive,
   unlinked,
+  showMenu = true,
+  compact,
   onPlay,
 }: TimesheetRowProps) {
   return (
-    <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] py-3 pl-3 pr-2 last:border-0">
+    <div
+      className={cn(
+        "flex w-full items-center gap-2 border-b border-[#ededed] pl-3 pr-2 last:border-b-0",
+        compact ? "py-2" : "py-3",
+      )}
+    >
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-1">
-          <p className="truncate text-sm text-[#1e2939]">{title}</p>
-          {isActive && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src="/figma/icon-dot.svg" alt="" className="size-3 shrink-0" width={12} height={12} />
-          )}
+          <p className="truncate text-sm leading-5 text-[#1e2939]">{title}</p>
+          {isActive && <FigmaGlyph src="/figma/icon-dot.svg" size={12} />}
         </div>
 
         <div
           className={cn(
-            "flex max-w-[120px] shrink-0 items-center gap-1 rounded-lg border border-[#e6e6e6] bg-white px-2 py-1",
+            "flex max-w-[120px] min-w-0 shrink-0 items-center gap-1 rounded-lg border border-[#e6e6e6] bg-white px-2 py-1",
+            unlinked && "flex-1",
           )}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
+          <FigmaGlyph
             src={unlinked ? "/figma/icon-warning.svg" : "/figma/icon-project.svg"}
-            alt=""
-            className="size-4 shrink-0"
-            width={16}
-            height={16}
+            size={16}
           />
-          <span className="truncate text-xs text-[var(--text-subtle)]">{projectLabel}</span>
+          <span className="truncate text-xs leading-4 text-[#4a5565]">
+            {unlinked ? "Unlinked" : projectLabel}
+          </span>
         </div>
       </div>
 
-      <span className="w-[50px] shrink-0 px-2 text-xs tabular-nums text-[#1e2939]">{duration}</span>
+      <span className="w-[50px] shrink-0 px-2 py-1 text-right text-xs tabular-nums leading-4 text-[#1e2939]">
+        {duration}
+      </span>
 
-      <Button
-        size="icon"
-        variant="outline"
-        className="size-6 shrink-0 rounded-full border-[var(--border-subtle)] p-0"
+      <button
+        type="button"
+        className="flex size-6 shrink-0 items-center justify-center rounded-full border border-[#ededed] bg-white p-1.5 outline-none transition-colors hover:bg-[#f5f5f5]"
         onClick={onPlay}
         aria-label={`Play ${title}`}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/figma/icon-play.svg" alt="" className="size-3" width={12} height={12} />
-      </Button>
+        <FigmaGlyph src="/figma/icon-play-blue.svg" size={12} />
+      </button>
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button type="button" className="size-4 shrink-0 outline-none" aria-label="Row menu">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/figma/icon-more.svg" alt="" className="size-4" width={16} height={16} />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={() => toast.message("Edit coming soon")}>Edit</DropdownMenuItem>
-          <DropdownMenuItem onClick={() => toast.message("Delete coming soon")}>Delete</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {showMenu ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="size-4 shrink-0 outline-none"
+              aria-label="Row menu"
+            >
+              <FigmaGlyph src="/figma/icon-more.svg" size={16} />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => toast.message("Edit coming soon")}>
+              Edit
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => toast.message("Delete coming soon")}>
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : (
+        <span className="size-4 shrink-0" aria-hidden />
+      )}
     </div>
   );
 }

@@ -6,6 +6,20 @@ import { app, BrowserWindow, shell } from "electron";
 import path from "path";
 import log from "electron-log/main";
 
+async function waitForRenderer(url: string, attempts = 40): Promise<void> {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetch(url, { redirect: "manual" });
+      // Any HTTP response means Next is up (including 307/401).
+      if (res.status > 0) return;
+    } catch {
+      // not ready yet
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error(`Renderer not reachable: ${url}`);
+}
+
 export function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 446,
@@ -26,9 +40,17 @@ export function createMainWindow(): BrowserWindow {
     },
   });
 
-  win.once("ready-to-show", () => {
-    win.show();
-  });
+  const reveal = () => {
+    if (win.isDestroyed()) return;
+    if (!win.isVisible()) win.show();
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  };
+
+  win.once("ready-to-show", reveal);
+
+  // Safety net — never leave a hidden window if ready-to-show never fires
+  setTimeout(reveal, 4000);
 
   // Open external links in the system browser
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -40,13 +62,20 @@ export function createMainWindow(): BrowserWindow {
   const rendererUrl = process.env.ELECTRON_RENDERER_URL || "http://localhost:3000";
   const startUrl = `${rendererUrl.replace(/\/$/, "")}/home`;
 
-  if (isDev) {
-    log.info(`[window] Loading renderer: ${startUrl}`);
-    void win.loadURL(startUrl);
-  } else {
-    // Production: load Next.js export / local server path (placeholder)
-    void win.loadURL(startUrl);
-  }
+  void (async () => {
+    try {
+      if (isDev) {
+        log.info(`[window] Waiting for renderer: ${startUrl}`);
+        await waitForRenderer(startUrl);
+      }
+      log.info(`[window] Loading renderer: ${startUrl}`);
+      await win.loadURL(startUrl);
+      reveal();
+    } catch (err) {
+      log.error("[window] Failed to load renderer", err);
+      reveal();
+    }
+  })();
 
   return win;
 }

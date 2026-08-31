@@ -1,14 +1,16 @@
 /**
  * Main-process tracking loop — screenshots while the timer is running.
- * Runs in Electron main so capture continues even if the renderer is throttled.
+ * Capture lives in Electron main so it continues if the renderer is throttled.
  */
 import { BrowserWindow } from "electron";
 import log from "electron-log/main";
 import { ScreenshotService } from "../screenshots";
 import { ActivityService } from "../activity";
+import { InputActivityMonitor } from "../input-activity";
 
 export type TrackingAuth = {
   accessToken: string;
+  refreshToken?: string | null;
   organizationId: string;
   deviceId: string;
   sessionToken?: string | null;
@@ -27,13 +29,17 @@ export class TrackingService {
   private running = false;
   private auth: TrackingAuth | null = null;
   private options: TrackingOptions = {
-    screenshotIntervalMs: 60_000,
+    screenshotIntervalMs: 5 * 60_000,
     enableScreenshots: true,
     firstScreenshotDelayMs: 3_000,
   };
   private screenshotTimer: NodeJS.Timeout | null = null;
   private firstShotTimer: NodeJS.Timeout | null = null;
+  private stopTimer: NodeJS.Timeout | null = null;
   private capturing = false;
+  private authWaiters: Array<(ok: boolean) => void> = [];
+  private idlePauseInFlight = false;
+  private lastCaptureAt = 0;
 
   static getInstance(): TrackingService {
     if (!TrackingService.instance) {
@@ -47,33 +53,56 @@ export class TrackingService {
   }
 
   updateAuth(auth: Partial<TrackingAuth>) {
-    if (!this.auth) {
-      this.auth = {
-        accessToken: auth.accessToken ?? "",
-        organizationId: auth.organizationId ?? "",
-        deviceId: auth.deviceId ?? "desktop",
-        sessionToken: auth.sessionToken,
-        apiBaseUrl: auth.apiBaseUrl ?? "http://localhost:3001",
-      };
-      return;
+    const next: TrackingAuth = this.auth ?? {
+      accessToken: "",
+      refreshToken: null,
+      organizationId: "",
+      deviceId: "desktop",
+      sessionToken: null,
+      apiBaseUrl: "http://localhost:3001",
+    };
+
+    if (auth.accessToken) next.accessToken = auth.accessToken;
+    if (auth.refreshToken) next.refreshToken = auth.refreshToken;
+    if (auth.organizationId) next.organizationId = auth.organizationId;
+    if (auth.deviceId) next.deviceId = auth.deviceId;
+    if (auth.sessionToken) next.sessionToken = auth.sessionToken;
+    if (auth.apiBaseUrl) next.apiBaseUrl = auth.apiBaseUrl;
+
+    this.auth = next;
+
+    if (auth.accessToken) {
+      const waiters = this.authWaiters.splice(0);
+      waiters.forEach((resolve) => resolve(true));
     }
-    this.auth = { ...this.auth, ...auth };
   }
 
   start(auth: TrackingAuth, options?: Partial<TrackingOptions>) {
+    if (this.stopTimer) {
+      clearTimeout(this.stopTimer);
+      this.stopTimer = null;
+    }
+
     this.stopTimersOnly();
-    this.auth = auth;
+    this.updateAuth(auth);
     this.options = {
       screenshotIntervalMs: Math.max(
-        15_000,
-        options?.screenshotIntervalMs ?? 60_000,
+        60_000,
+        options?.screenshotIntervalMs ?? 5 * 60_000,
       ),
       enableScreenshots: options?.enableScreenshots !== false,
       firstScreenshotDelayMs: options?.firstScreenshotDelayMs ?? 3_000,
     };
     this.running = true;
+    this.idlePauseInFlight = false;
 
     ActivityService.getInstance().start();
+    InputActivityMonitor.getInstance().start(
+      this.options.screenshotIntervalMs,
+      () => {
+        void this.handleIdleTimeout();
+      },
+    );
 
     if (this.options.enableScreenshots) {
       this.firstShotTimer = setTimeout(() => {
@@ -92,10 +121,18 @@ export class TrackingService {
   }
 
   stop() {
-    this.running = false;
-    this.stopTimersOnly();
-    ActivityService.getInstance().stop();
-    log.info("[TrackingService] stopped");
+    if (this.stopTimer) {
+      clearTimeout(this.stopTimer);
+    }
+    // Survive React Strict Mode remounts and brief timer-sync blips.
+    this.stopTimer = setTimeout(() => {
+      this.stopTimer = null;
+      this.running = false;
+      this.stopTimersOnly();
+      InputActivityMonitor.getInstance().stop();
+      ActivityService.getInstance().stop();
+      log.info("[TrackingService] stopped");
+    }, 2000);
     return { ok: true };
   }
 
@@ -115,6 +152,7 @@ export class TrackingService {
     message?: string;
     id?: string;
     url?: string;
+    activityPercent?: number;
   }> {
     if (!this.running || !this.auth) {
       return { ok: false, message: "Tracking not running" };
@@ -125,7 +163,11 @@ export class TrackingService {
 
     this.capturing = true;
     try {
-      const shot = await ScreenshotService.getInstance().capture();
+      let shot = await ScreenshotService.getInstance().capture();
+      if (!shot?.buffer?.length) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        shot = await ScreenshotService.getInstance().capture();
+      }
       if (!shot?.buffer?.length) {
         const message = "Screenshot capture failed";
         log.warn(`[TrackingService] ${message}`);
@@ -134,11 +176,13 @@ export class TrackingService {
       }
 
       const win = await ActivityService.getInstance().getActiveWindow();
+      const activityPercent = InputActivityMonitor.getInstance().consumePercent();
       const uploaded = await this.uploadBuffer(shot.buffer, {
         timestamp: shot.capturedAt,
         appName: win.appName || "Desktop",
         windowTitle: win.windowTitle || "",
         mimeType: "image/png",
+        activityPercent,
       });
 
       if (!uploaded.ok) {
@@ -148,7 +192,10 @@ export class TrackingService {
         return uploaded;
       }
 
-      log.info(`[TrackingService] screenshot uploaded ${uploaded.id}`);
+      log.info(
+        `[TrackingService] screenshot uploaded ${uploaded.id} (${uploaded.activityPercent ?? 0}% activity)`,
+      );
+      this.lastCaptureAt = Date.now();
       this.emitToRenderer("screenshot:uploaded", uploaded);
       return uploaded;
     } catch (error) {
@@ -169,70 +216,44 @@ export class TrackingService {
       appName: string;
       windowTitle: string;
       mimeType: string;
+      activityPercent: number;
     },
-  ): Promise<{ ok: boolean; message?: string; id?: string; url?: string }> {
+  ): Promise<{
+    ok: boolean;
+    message?: string;
+    id?: string;
+    url?: string;
+    activityPercent?: number;
+  }> {
     if (!this.auth?.accessToken || !this.auth.organizationId) {
       return { ok: false, message: "Missing auth for screenshot upload" };
     }
 
-    const base = this.auth.apiBaseUrl.replace(/\/$/, "");
-    const form = new FormData();
-    const file = new File([new Uint8Array(buffer)], "screenshot.png", {
-      type: meta.mimeType,
-    });
-    form.append("file", file);
-    form.append("timestamp", meta.timestamp);
-    form.append("appName", meta.appName || "Desktop");
-    if (meta.windowTitle) {
-      form.append("windowTitle", meta.windowTitle);
-    }
-    form.append("deviceId", this.auth.deviceId);
-
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.auth.accessToken}`,
-      "x-organization-id": this.auth.organizationId,
-      "x-device-id": this.auth.deviceId,
-      "x-device-type": "desktop",
+    const post = async () => {
+      const { body, contentType } = this.buildMultipartBody(buffer, meta);
+      return fetch(`${this.auth!.apiBaseUrl.replace(/\/$/, "")}/screenshots/upload`, {
+        method: "POST",
+        headers: {
+          ...this.buildAuthHeaders(),
+          "Content-Type": contentType,
+        },
+        body,
+      });
     };
-    if (this.auth.sessionToken) {
-      headers["x-session-token"] = this.auth.sessionToken;
-    }
 
-    let response = await fetch(`${base}/screenshots/upload`, {
-      method: "POST",
-      headers,
-      body: form,
-    });
+    let response = await post();
 
-    // One refresh attempt on 401
     if (response.status === 401) {
       const refreshed = await this.refreshAccessToken();
       if (refreshed) {
-        headers.Authorization = `Bearer ${this.auth.accessToken}`;
-        // Rebuild form — body can only be consumed once
-        const retryForm = new FormData();
-        const retryFile = new File([new Uint8Array(buffer)], "screenshot.png", {
-          type: meta.mimeType,
-        });
-        retryForm.append("file", retryFile);
-        retryForm.append("timestamp", meta.timestamp);
-        retryForm.append("appName", meta.appName || "Desktop");
-        if (meta.windowTitle) {
-          retryForm.append("windowTitle", meta.windowTitle);
-        }
-        retryForm.append("deviceId", this.auth.deviceId);
-        response = await fetch(`${base}/screenshots/upload`, {
-          method: "POST",
-          headers,
-          body: retryForm,
-        });
+        response = await post();
       }
     }
 
     const json = (await response.json().catch(() => null)) as {
       success?: boolean;
       message?: string;
-      data?: { id?: string; url?: string };
+      data?: { id?: string; url?: string; imageUrl?: string };
     } | null;
 
     if (!response.ok || !json?.success) {
@@ -245,15 +266,146 @@ export class TrackingService {
     return {
       ok: true,
       id: json.data?.id,
-      url: json.data?.url,
+      url: json.data?.url ?? json.data?.imageUrl,
+      activityPercent: meta.activityPercent,
+    };
+  }
+
+  private buildAuthHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.auth?.accessToken ?? ""}`,
+      "x-organization-id": this.auth?.organizationId ?? "",
+      "x-device-id": this.auth?.deviceId ?? "desktop",
+      "x-device-type": "desktop",
+    };
+    if (this.auth?.sessionToken) {
+      headers["x-session-token"] = this.auth.sessionToken;
+    }
+    return headers;
+  }
+
+  /** Raw multipart — more reliable than FormData/Blob in Electron main. */
+  private buildMultipartBody(
+    buffer: Buffer,
+    meta: {
+      timestamp: string;
+      appName: string;
+      windowTitle: string;
+      mimeType: string;
+      activityPercent: number;
+    },
+  ): { body: Buffer; contentType: string } {
+    const boundary = `----Gr8rScreenshot${Date.now()}${process.pid}`;
+    const chunks: Buffer[] = [];
+    const pushField = (name: string, value: string) => {
+      chunks.push(
+        Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
+        ),
+      );
+    };
+    pushField("timestamp", meta.timestamp);
+    pushField("appName", meta.appName || "Desktop");
+    if (meta.windowTitle) {
+      pushField("windowTitle", meta.windowTitle);
+    }
+    pushField("deviceId", this.auth?.deviceId ?? "desktop");
+    pushField("activityPercent", String(Math.round(meta.activityPercent)));
+    chunks.push(
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="screenshot.png"\r\nContent-Type: ${meta.mimeType}\r\n\r\n`,
+      ),
+    );
+    chunks.push(buffer);
+    chunks.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+    return {
+      body: Buffer.concat(chunks),
+      contentType: `multipart/form-data; boundary=${boundary}`,
     };
   }
 
   private async refreshAccessToken(): Promise<boolean> {
     if (!this.auth) return false;
-    // Renderer owns refresh tokens in localStorage — ask it to push a new token
+    const previous = this.auth.accessToken;
+    const base = this.auth.apiBaseUrl.replace(/\/$/, "");
+
+    if (!this.auth.refreshToken) {
+      log.warn("[TrackingService] no refresh token in main process");
+    } else {
+      try {
+        const response = await fetch(`${base}/auth/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refreshToken: this.auth.refreshToken }),
+        });
+        const json = (await response.json().catch(() => null)) as {
+          success?: boolean;
+          message?: string;
+          data?: { access_token?: string };
+        } | null;
+        const nextToken = json?.data?.access_token;
+        if (response.ok && nextToken) {
+          this.auth.accessToken = nextToken;
+          this.emitToRenderer("tracking:token-refreshed", {
+            accessToken: nextToken,
+          });
+          log.info("[TrackingService] access token refreshed from main process");
+          return true;
+        }
+        log.warn(
+          `[TrackingService] main-process refresh failed: ${json?.message ?? response.status}`,
+        );
+      } catch (error) {
+        log.warn("[TrackingService] main-process refresh error", error);
+      }
+    }
+
     this.emitToRenderer("tracking:auth-expired", {});
-    return false;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.authWaiters = this.authWaiters.filter((waiter) => waiter !== onDone);
+        resolve(false);
+      }, 12_000);
+      const onDone = (ok: boolean) => {
+        clearTimeout(timer);
+        resolve(
+          ok &&
+            Boolean(
+              this.auth?.accessToken && this.auth.accessToken !== previous,
+            ),
+        );
+      };
+      this.authWaiters.push(onDone);
+    });
+  }
+
+  private async handleIdleTimeout() {
+    if (!this.running || this.idlePauseInFlight) return;
+    this.idlePauseInFlight = true;
+    this.stopTimersOnly();
+
+    log.info(
+      `[TrackingService] idle for one screenshot interval — pausing timer`,
+    );
+
+    if (this.options.enableScreenshots) {
+      const started = Date.now();
+      while (this.capturing && Date.now() - started < 15_000) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      if (!this.capturing && Date.now() - this.lastCaptureAt > 8_000) {
+        await this.captureAndUpload();
+      }
+    }
+
+    this.emitToRenderer("tracking:idle-timeout", {
+      intervalMs: this.options.screenshotIntervalMs,
+      activityPercent: InputActivityMonitor.getInstance().peekPercent(),
+    });
+
+    this.running = false;
+    InputActivityMonitor.getInstance().stop();
+    ActivityService.getInstance().stop();
   }
 
   private emitToRenderer(channel: string, payload: unknown) {

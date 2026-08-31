@@ -40,6 +40,7 @@ export interface ElectronAPI {
   tracking: {
     start: (payload: {
       accessToken: string;
+      refreshToken?: string | null;
       organizationId: string;
       deviceId: string;
       sessionToken?: string | null;
@@ -51,6 +52,7 @@ export interface ElectronAPI {
     stop: () => Promise<{ ok: boolean }>;
     updateAuth: (payload: {
       accessToken?: string;
+      refreshToken?: string | null;
       organizationId?: string;
       deviceId?: string;
       sessionToken?: string | null;
@@ -64,10 +66,21 @@ export interface ElectronAPI {
     }>;
     status: () => Promise<{ running: boolean }>;
     onUploaded: (
-      callback: (payload: { id?: string; url?: string }) => void,
+      callback: (payload: {
+        id?: string;
+        url?: string;
+        activityPercent?: number;
+      }) => void,
     ) => () => void;
     onFailed: (
       callback: (payload: { message?: string }) => void,
+    ) => () => void;
+    onAuthExpired: (callback: () => void) => () => void;
+    onTokenRefreshed: (
+      callback: (payload: { accessToken?: string }) => void,
+    ) => () => void;
+    onIdleTimeout: (
+      callback: (payload?: { intervalMs?: number; activityPercent?: number }) => void,
     ) => () => void;
   };
   notification: {

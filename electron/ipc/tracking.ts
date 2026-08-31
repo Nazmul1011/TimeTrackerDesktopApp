@@ -20,6 +20,7 @@ export function registerTrackingIpc(): void {
     ) => {
       const {
         accessToken,
+        refreshToken,
         organizationId,
         deviceId,
         sessionToken,
@@ -36,6 +37,7 @@ export function registerTrackingIpc(): void {
       const result = tracking.start(
         {
           accessToken,
+          refreshToken,
           organizationId,
           deviceId: deviceId || "desktop",
           sessionToken,

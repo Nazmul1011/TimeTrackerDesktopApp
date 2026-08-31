@@ -1,26 +1,53 @@
 /**
- * Summary tab — month/week cards + top apps.
+ * Summary tab — month/week cards from backend + top apps.
  */
 "use client";
 
-import { SUMMARY, TOP_APPS } from "@/constants/demo-data";
+import { TOP_APPS } from "@/constants/demo-data";
 import { SummaryCard } from "@/components/summary/summary-card";
+import {
+  formatSummaryHours,
+  useSummaryStats,
+} from "@/hooks/useSummaryStats";
 
 export function SummaryTab() {
+  const { stats, isLoading, error, reload } = useSummaryStats();
+
   return (
     <div className="flex flex-col gap-4">
+      {error ? (
+        <div className="rounded-lg border border-[#ededed] bg-white px-3 py-2 text-center">
+          <p className="text-xs text-[#99a1af]">{error}</p>
+          <button
+            type="button"
+            className="mt-1 text-xs font-medium text-[#2b7fff]"
+            onClick={() => void reload()}
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-2 gap-2">
         <SummaryCard
-          title="This Month"
-          value={`${SUMMARY.monthHours}h`}
-          goal={`${SUMMARY.monthGoal}h`}
-          expected={`${SUMMARY.monthExpected}h`}
+          title={stats.month.title}
+          value={
+            isLoading && stats.month.loggedHours === 0
+              ? "—"
+              : formatSummaryHours(stats.month.loggedHours)
+          }
+          goal={formatSummaryHours(stats.month.goalHours)}
+          expected={formatSummaryHours(stats.month.expectedSoFarHours)}
         />
         <SummaryCard
-          title="This Week"
-          value={`${SUMMARY.weekHours}h`}
-          goal={`${SUMMARY.weekGoal}h`}
-          expected={`${SUMMARY.weekExpected}h`}
+          title={stats.week.title}
+          value={
+            isLoading && stats.week.loggedHours === 0
+              ? "—"
+              : formatSummaryHours(stats.week.loggedHours)
+          }
+          goal={formatSummaryHours(stats.week.goalHours)}
+          expected={formatSummaryHours(stats.week.expectedSoFarHours)}
         />
       </div>
 
@@ -35,7 +62,9 @@ export function SummaryTab() {
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={app.icon} alt={app.name} className="size-4" width={16} height={16} />
-              <span className="text-[11px] leading-[14px] text-[var(--text-muted)]">{app.percent}%</span>
+              <span className="text-[11px] leading-[14px] text-[var(--text-muted)]">
+                {app.percent}%
+              </span>
             </div>
           ))}
         </div>

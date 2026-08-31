@@ -1,8 +1,10 @@
 /**
  * Settings form — working switches persisted in Zustand.
+ * Screenshot interval is org-admin controlled (read-only here).
  */
 "use client";
 
+import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -14,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { monitoringApi } from "@/services/api/monitoring.api";
 import { useSettingsStore } from "@/store/settings.store";
 import { toast } from "sonner";
 
@@ -21,6 +24,30 @@ export function SettingsForm() {
   const settings = useSettingsStore((s) => s.settings);
   const setSettings = useSettingsStore((s) => s.setSettings);
   const { setTheme } = useTheme();
+  const [orgIntervalMinutes, setOrgIntervalMinutes] = useState<number | null>(
+    null,
+  );
+  const [orgScreenshotsEnabled, setOrgScreenshotsEnabled] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    void monitoringApi
+      .getConfig()
+      .then((cfg) => {
+        if (cancelled) return;
+        const minutes = Number(cfg?.screenshotInterval);
+        setOrgIntervalMinutes(
+          Number.isFinite(minutes) && minutes > 0 ? minutes : 5,
+        );
+        setOrgScreenshotsEnabled(cfg?.screenshotEnabled !== false);
+      })
+      .catch(() => {
+        if (!cancelled) setOrgIntervalMinutes(5);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="surface-card w-full space-y-5 p-4">
@@ -57,23 +84,17 @@ export function SettingsForm() {
       <div className="flex items-center justify-between">
         <div>
           <Label className="text-xs">Screenshot interval</Label>
-          <p className="text-[11px] text-[var(--text-muted)]">Minutes between captures</p>
+          <p className="text-[11px] text-[var(--text-muted)]">
+            Set by your organization admin
+          </p>
         </div>
-        <Select
-          value={String(settings.screenshotIntervalMinutes)}
-          onValueChange={(v) => setSettings({ screenshotIntervalMinutes: Number(v) })}
-        >
-          <SelectTrigger className="h-8 w-20 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {[5, 10, 15, 30].map((m) => (
-              <SelectItem key={m} value={String(m)}>
-                {m}m
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <span className="text-xs text-[#707070]">
+          {!orgScreenshotsEnabled
+            ? "Off"
+            : orgIntervalMinutes
+              ? `Every ${orgIntervalMinutes} min`
+              : "…"}
+        </span>
       </div>
       <Separator />
       <div className="flex items-center justify-between">

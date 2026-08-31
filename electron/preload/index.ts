@@ -42,6 +42,23 @@ const electronAPI = {
       ipcRenderer.on("screenshot:failed", listener);
       return () => ipcRenderer.removeListener("screenshot:failed", listener);
     },
+    onAuthExpired: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on("tracking:auth-expired", listener);
+      return () => ipcRenderer.removeListener("tracking:auth-expired", listener);
+    },
+    onTokenRefreshed: (callback: (payload: { accessToken?: string }) => void) => {
+      const listener = (_event: unknown, payload: { accessToken?: string }) =>
+        callback(payload);
+      ipcRenderer.on("tracking:token-refreshed", listener);
+      return () =>
+        ipcRenderer.removeListener("tracking:token-refreshed", listener);
+    },
+    onIdleTimeout: (callback: (payload: unknown) => void) => {
+      const listener = (_event: unknown, payload: unknown) => callback(payload);
+      ipcRenderer.on("tracking:idle-timeout", listener);
+      return () => ipcRenderer.removeListener("tracking:idle-timeout", listener);
+    },
   },
   // Activity
   activity: {

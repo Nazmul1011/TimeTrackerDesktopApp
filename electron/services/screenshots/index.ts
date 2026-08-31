@@ -1,6 +1,6 @@
 /**
  * Screenshot capture via Electron desktopCapturer, with OS CLI fallbacks.
- * Linux/Wayland often returns empty thumbnails — fall back to gnome-screenshot/scrot/grim.
+ * Linux/Wayland often returns empty thumbnails — fall back to import/xwd/gdbus.
  */
 import { desktopCapturer, screen } from "electron";
 import { execFile } from "child_process";
@@ -19,8 +19,24 @@ export type CapturedScreenshot = {
   capturedAt: string;
 };
 
-const MAX_THUMB_WIDTH = 1920;
-const MAX_THUMB_HEIGHT = 1080;
+const THUMB_SIZES = [
+  { width: 1920, height: 1080 },
+  { width: 1280, height: 720 },
+  { width: 800, height: 450 },
+] as const;
+
+const EXEC_ENV = {
+  ...process.env,
+  PATH: [
+    process.env.PATH,
+    "/usr/bin",
+    "/bin",
+    "/usr/local/bin",
+    "/snap/bin",
+  ]
+    .filter(Boolean)
+    .join(path.delimiter),
+};
 
 export class ScreenshotService {
   private static instance: ScreenshotService | null = null;
@@ -34,27 +50,25 @@ export class ScreenshotService {
 
   async capture(): Promise<CapturedScreenshot | null> {
     const capturedAt = new Date().toISOString();
+    const isWayland = Boolean(process.env.WAYLAND_DISPLAY);
+    const order = isWayland
+      ? (["cli", "electron"] as const)
+      : (["electron", "cli"] as const);
 
-    const viaElectron = await this.captureViaDesktopCapturer();
-    if (viaElectron) {
-      log.info(
-        "[ScreenshotService] captured via desktopCapturer",
-        viaElectron.width,
-        "x",
-        viaElectron.height,
-      );
-      return { ...viaElectron, capturedAt };
-    }
-
-    const viaCli = await this.captureViaCli();
-    if (viaCli) {
-      log.info(
-        "[ScreenshotService] captured via CLI fallback",
-        viaCli.width,
-        "x",
-        viaCli.height,
-      );
-      return { ...viaCli, capturedAt };
+    for (const method of order) {
+      const shot =
+        method === "electron"
+          ? await this.captureViaDesktopCapturer()
+          : await this.captureViaCli();
+      if (shot?.buffer?.length) {
+        log.info(
+          `[ScreenshotService] captured via ${method}`,
+          shot.width,
+          "x",
+          shot.height,
+        );
+        return { ...shot, capturedAt };
+      }
     }
 
     log.error("[ScreenshotService] All capture methods failed");
@@ -69,44 +83,52 @@ export class ScreenshotService {
       const primary = screen.getPrimaryDisplay();
       const { width, height } = primary.size;
       const scale = Math.min(primary.scaleFactor || 1, 2);
-      const thumbWidth = Math.min(
-        Math.floor(width * scale),
-        MAX_THUMB_WIDTH,
-      );
-      const thumbHeight = Math.min(
-        Math.floor(height * scale),
-        MAX_THUMB_HEIGHT,
-      );
 
-      const sources = await desktopCapturer.getSources({
-        types: ["screen"],
-        thumbnailSize: { width: thumbWidth, height: thumbHeight },
-        fetchWindowIcons: false,
-      });
+      for (const max of THUMB_SIZES) {
+        const thumbWidth = Math.min(Math.floor(width * scale), max.width);
+        const thumbHeight = Math.min(Math.floor(height * scale), max.height);
+        const sources = await desktopCapturer.getSources({
+          types: ["screen"],
+          thumbnailSize: { width: thumbWidth, height: thumbHeight },
+          fetchWindowIcons: false,
+        });
 
-      const source =
-        sources.find((s) => s.display_id === String(primary.id)) || sources[0];
+        const ranked = sources
+          .map((source) => ({
+            source,
+            size: source.thumbnail?.getSize() ?? { width: 0, height: 0 },
+          }))
+          .filter(
+            ({ source, size }) =>
+              source.thumbnail &&
+              !source.thumbnail.isEmpty() &&
+              size.width >= 32 &&
+              size.height >= 32,
+          )
+          .sort(
+            (a, b) =>
+              b.size.width * b.size.height - a.size.width * a.size.height,
+          );
 
-      if (!source?.thumbnail || source.thumbnail.isEmpty()) {
-        log.warn("[ScreenshotService] desktopCapturer returned empty thumbnail");
-        return null;
+        const preferred =
+          ranked.find(
+            ({ source }) => source.display_id === String(primary.id),
+          ) ?? ranked[0];
+
+        if (!preferred) continue;
+
+        const png = preferred.source.thumbnail.toPNG();
+        if (!png.length) continue;
+
+        return {
+          buffer: png,
+          width: preferred.size.width,
+          height: preferred.size.height,
+        };
       }
 
-      // Reject near-black / tiny invalid captures (common Wayland failure)
-      const size = source.thumbnail.getSize();
-      if (size.width < 32 || size.height < 32) {
-        log.warn("[ScreenshotService] thumbnail too small", size);
-        return null;
-      }
-
-      const png = source.thumbnail.toPNG();
-      if (!png.length) return null;
-
-      return {
-        buffer: png,
-        width: size.width,
-        height: size.height,
-      };
+      log.warn("[ScreenshotService] desktopCapturer returned empty thumbnail");
+      return null;
     } catch (error) {
       log.warn("[ScreenshotService] desktopCapturer failed", error);
       return null;
@@ -126,23 +148,40 @@ export class ScreenshotService {
 
     if (process.platform === "linux") {
       const isWayland = Boolean(process.env.WAYLAND_DISPLAY);
+      commands.push({
+        bin: "gdbus",
+        args: [
+          "call",
+          "--session",
+          "--dest",
+          "org.gnome.Shell.Screenshot",
+          "--object-path",
+          "/org/gnome/Shell/Screenshot",
+          "--method",
+          "org.gnome.Shell.Screenshot.Screenshot",
+          "false",
+          "false",
+          tmpPath,
+        ],
+      });
       if (isWayland) {
         commands.push(
           { bin: "grim", args: [tmpPath] },
           { bin: "gnome-screenshot", args: ["-f", tmpPath] },
+          { bin: "spectacle", args: ["-b", "-n", "-o", tmpPath] },
         );
       } else {
-        // X11 — prefer non-interactive tools
         commands.push(
-          { bin: "import", args: ["-window", "root", tmpPath] },
+          { bin: "import", args: ["-silent", "-window", "root", tmpPath] },
+          { bin: "maim", args: [tmpPath] },
           { bin: "scrot", args: ["-o", tmpPath] },
           { bin: "gnome-screenshot", args: ["-f", tmpPath] },
+          { bin: "spectacle", args: ["-b", "-n", "-o", tmpPath] },
         );
       }
     } else if (process.platform === "darwin") {
       commands.push({ bin: "screencapture", args: ["-x", tmpPath] });
     } else if (process.platform === "win32") {
-      // PowerShell .NET screenshot
       const ps = `
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -160,13 +199,15 @@ $g.Dispose(); $bmp.Dispose()
 
     for (const cmd of commands) {
       try {
-        await execFileAsync(cmd.bin, cmd.args, { timeout: 8000 });
+        await execFileAsync(cmd.bin, cmd.args, {
+          timeout: 8000,
+          env: EXEC_ENV,
+        });
         const buffer = await fs.readFile(tmpPath);
         if (buffer.length < 100) {
           log.warn(`[ScreenshotService] ${cmd.bin} wrote tiny file`);
           continue;
         }
-        // We don't parse PNG dimensions here — backend sharp will
         return {
           buffer,
           width: 0,

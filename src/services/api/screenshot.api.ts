@@ -19,6 +19,7 @@ export type ApiScreenshot = {
   appName?: string | null;
   windowTitle?: string | null;
   isBlurred?: boolean;
+  activityPercent?: number | null;
 };
 
 function toIsoDate(date = new Date()): string {
@@ -65,13 +66,15 @@ export const screenshotApi = {
     };
   },
 
-  async listToday(limit = 40) {
+  async listToday(limit = 100) {
     const today = toIsoDate();
     const { data } = await apiClient.get<
       ApiResponse<{
-        data: ApiScreenshot[];
+        data?: ApiScreenshot[];
+        screenshots?: ApiScreenshot[];
+        items?: ApiScreenshot[];
         meta?: { total: number };
-      }>
+      }> | ApiScreenshot[]
     >("/screenshots", {
       params: {
         startDate: today,
@@ -81,7 +84,17 @@ export const screenshotApi = {
       },
     });
 
-    const items = data.data?.data ?? [];
+    const payload = data.data as
+      | {
+          data?: ApiScreenshot[];
+          screenshots?: ApiScreenshot[];
+          items?: ApiScreenshot[];
+        }
+      | ApiScreenshot[]
+      | undefined;
+    const items = Array.isArray(payload)
+      ? payload
+      : payload?.data ?? payload?.screenshots ?? payload?.items ?? [];
     return items.map((item) => ({
       ...item,
       imageUrl:

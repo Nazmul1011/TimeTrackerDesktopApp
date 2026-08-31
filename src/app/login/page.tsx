@@ -155,7 +155,9 @@ export default function LoginPage() {
         {!pendingOrgs ? (
           <>
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email" className="text-sm font-medium text-[#1e2939]">
+                Email
+              </Label>
               <Input
                 id="email"
                 type="email"
@@ -163,10 +165,14 @@ export default function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 autoComplete="email"
+                placeholder="you@company.com"
+                className="text-[#1e2939]"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password" className="text-sm font-medium text-[#1e2939]">
+                Password
+              </Label>
               <Input
                 id="password"
                 type="password"
@@ -174,14 +180,21 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 autoComplete="current-password"
+                placeholder="Enter your password"
+                className="text-[#1e2939]"
               />
             </div>
           </>
         ) : (
           <div className="space-y-2">
-            <Label htmlFor="organization">Organization</Label>
+            <Label htmlFor="organization" className="text-sm font-medium text-[#1e2939]">
+              Organization
+            </Label>
             <Select value={selectedOrgId} onValueChange={setSelectedOrgId}>
-              <SelectTrigger id="organization">
+              <SelectTrigger
+                id="organization"
+                className="h-10 rounded-lg border-[#e6e6e6] bg-white text-[#1e2939]"
+              >
                 <SelectValue placeholder="Select organization" />
               </SelectTrigger>
               <SelectContent>

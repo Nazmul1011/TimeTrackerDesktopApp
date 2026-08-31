@@ -59,13 +59,20 @@ export interface Screenshot {
 
 export type NotificationType = "info" | "warning" | "success" | "error";
 
+/** Visual kind for Figma notification icons. */
+export type NotificationKind = "leave" | "screenshot" | "info";
+
 export interface AppNotification {
   id: string;
   title: string;
   body: string;
   type: NotificationType;
+  kind?: NotificationKind;
+  /** Backend NotificationType enum value when loaded from API. */
+  backendType?: string;
   read: boolean;
   createdAt: string;
+  actionUrl?: string | null;
 }
 
 export interface Settings {

@@ -1,21 +1,18 @@
 /**
- * Notification panel — empty shell.
+ * Notification panel — reused empty-state card (full page still uses list).
  */
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 export function NotificationPanel() {
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="pb-2">
         <CardTitle className="text-base">Notifications</CardTitle>
       </CardHeader>
       <CardContent>
-        <ScrollArea className="h-[320px]">
-          <p className="py-8 text-center text-sm text-muted-foreground">No notifications</p>
-        </ScrollArea>
+        <p className="py-8 text-center text-sm text-muted-foreground">No notifications</p>
       </CardContent>
     </Card>
   );

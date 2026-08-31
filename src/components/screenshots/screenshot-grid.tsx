@@ -3,10 +3,10 @@
  */
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { dayjs } from "@/lib/dayjs";
 import { SCREENSHOT_CAPTURED_EVENT } from "@/hooks/useTrackingAgent";
-import { screenshotApi } from "@/services/api/screenshot.api";
+import { screenshotApi, resolveScreenshotUrl } from "@/services/api/screenshot.api";
 import { useAuthStore } from "@/store/auth.store";
 import {
   ScreenshotCard,
@@ -16,15 +16,19 @@ import {
 function mapApiToItem(item: {
   id: string;
   imageUrl?: string | null;
+  url?: string | null;
   capturedAt: string;
   appName?: string | null;
+  activityPercent?: number | null;
 }): ScreenshotItem {
   return {
     id: item.id,
-    imageUrl: item.imageUrl,
+    imageUrl: resolveScreenshotUrl(item.imageUrl ?? item.url) ?? item.imageUrl,
     capturedAt: item.capturedAt,
     appName: item.appName,
     timeLabel: dayjs(item.capturedAt).format("hh:mm A"),
+    activityPercent:
+      typeof item.activityPercent === "number" ? item.activityPercent : null,
   };
 }
 
@@ -33,36 +37,77 @@ export function ScreenshotGrid() {
   const [items, setItems] = useState<ScreenshotItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const loadedOnceRef = useRef(false);
 
-  const reload = useCallback(async () => {
-    if (!organizationId) {
-      setItems([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const rows = await screenshotApi.listToday();
-      setItems(rows.map(mapApiToItem));
-    } catch {
-      setError("Could not load screenshots");
-      setItems([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [organizationId]);
+  const reload = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!organizationId) {
+        setItems([]);
+        setLoading(false);
+        return;
+      }
+      if (!opts?.silent && !loadedOnceRef.current) {
+        setLoading(true);
+      }
+      setError(null);
+      try {
+        const rows = await screenshotApi.listToday(100);
+        setItems(rows.map(mapApiToItem));
+        loadedOnceRef.current = true;
+      } catch {
+        if (!loadedOnceRef.current) {
+          setError("Could not load screenshots");
+          setItems([]);
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [organizationId],
+  );
 
   useEffect(() => {
     void reload();
   }, [reload]);
 
   useEffect(() => {
-    const onCaptured = () => {
-      void reload();
+    const onCaptured = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        id?: string;
+        url?: string;
+        activityPercent?: number;
+      }>).detail;
+      if (detail?.id && detail?.url) {
+        const imageUrl = resolveScreenshotUrl(detail.url) ?? detail.url;
+        setItems((prev) => {
+          if (prev.some((row) => row.id === detail.id)) return prev;
+          return [
+            {
+              id: detail.id!,
+              imageUrl,
+              capturedAt: new Date().toISOString(),
+              appName: null,
+              timeLabel: dayjs().format("hh:mm A"),
+              activityPercent:
+                typeof detail.activityPercent === "number"
+                  ? detail.activityPercent
+                  : null,
+            },
+            ...prev,
+          ];
+        });
+      }
+      void reload({ silent: true });
     };
     window.addEventListener(SCREENSHOT_CAPTURED_EVENT, onCaptured);
     return () => window.removeEventListener(SCREENSHOT_CAPTURED_EVENT, onCaptured);
+  }, [reload]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      void reload({ silent: true });
+    }, 8_000);
+    return () => window.clearInterval(id);
   }, [reload]);
 
   const handleRequestDelete = (id: string) => {

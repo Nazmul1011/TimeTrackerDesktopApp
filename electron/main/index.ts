@@ -21,6 +21,10 @@ loadEnv();
 log.transports.file.level = "info";
 log.info("[main] Starting Gr8r Time Tracker desktop client");
 
+if (process.platform === "linux") {
+  app.commandLine.appendSwitch("enable-features", "WebRTCPipeWireCapturer");
+}
+
 // Single instance lock
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {

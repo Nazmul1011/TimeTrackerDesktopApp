@@ -3,6 +3,7 @@
  */
 import { apiClient, ensureDeviceId } from "./client";
 import type { ApiResponse, ApiTimer } from "./types";
+import { isValidProjectId } from "@/lib/project";
 
 export type StartTimerPayload = {
   projectId?: string;
@@ -27,12 +28,18 @@ export type StopTimerResult = {
 
 export const timerApi = {
   async start(payload: StartTimerPayload = {}) {
+    const body: Record<string, string> = {
+      deviceId: payload.deviceId ?? ensureDeviceId(),
+    };
+    if (payload.description?.trim()) {
+      body.description = payload.description.trim();
+    }
+    if (payload.projectId && isValidProjectId(payload.projectId)) {
+      body.projectId = payload.projectId.trim();
+    }
     const { data } = await apiClient.post<ApiResponse<{ timer: ApiTimer }>>(
       "/timer/start",
-      {
-        ...payload,
-        deviceId: payload.deviceId ?? ensureDeviceId(),
-      },
+      body,
     );
     return data.data.timer;
   },
@@ -79,8 +86,12 @@ export const timerApi = {
 
   async current() {
     const { data } = await apiClient.get<
-      ApiResponse<{ timer: ApiTimer } | null>
+      ApiResponse<{ timer: ApiTimer } | ApiTimer | null>
     >("/timer/current");
-    return data.data?.timer ?? null;
+    const payload = data.data;
+    if (!payload) return null;
+    if ("timer" in payload && payload.timer) return payload.timer;
+    if ("id" in payload && "startTime" in payload) return payload as ApiTimer;
+    return null;
   },
 };

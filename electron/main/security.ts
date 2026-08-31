@@ -26,6 +26,15 @@ export function applySecurityDefaults(): void {
   });
 
   app.whenReady().then(() => {
+    session.defaultSession.setPermissionCheckHandler((_wc, permission) => {
+      const name = String(permission);
+      return (
+        name === "media" ||
+        name === "display-capture" ||
+        name === "fullscreen"
+      );
+    });
+
     session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
       // Allow display capture for screenshots; deny everything else by default
       if (

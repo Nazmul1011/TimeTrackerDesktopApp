@@ -10,6 +10,7 @@ import { formatElapsed } from "@/lib/dayjs";
 import { dispatchTimerStopped, TIMER_STOPPED_EVENT } from "@/lib/timer-events";
 import { timerApi } from "@/services/api/timer.api";
 import { timesheetApi } from "@/services/api/timesheet.api";
+import { sanitizeProjectId } from "@/lib/project";
 import { useAuthStore } from "@/store/auth.store";
 import { useTimerStore } from "@/store/timer.store";
 
@@ -44,6 +45,7 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
   const reset = useTimerStore((s) => s.reset);
 
   const busyRef = useRef(false);
+  const missingTimerStreakRef = useRef(0);
   const [, forceRender] = useState(0);
 
   const refreshTodayTotal = useCallback(async () => {
@@ -81,22 +83,30 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
 
   useEffect(() => {
     if (!isAuthenticated || !organizationId) return;
+    missingTimerStreakRef.current = 0;
     const id = window.setInterval(async () => {
       try {
         const current = await timerApi.current();
         const status = useTimerStore.getState().timer.status;
         if (!current) {
-          if (status !== "idle") {
+          if (status === "idle") {
+            missingTimerStreakRef.current = 0;
+            return;
+          }
+          // A single empty /timer/current (auth blip, race after start)
+          // used to call setIdle() and kill screenshot capture. Confirm twice.
+          missingTimerStreakRef.current += 1;
+          if (missingTimerStreakRef.current >= 2) {
             setIdle();
-            dispatchTimerStopped();
           }
           return;
         }
+        missingTimerStreakRef.current = 0;
         if (status === "idle") {
           hydrateFromApi(current);
         }
       } catch {
-        // ignore poll errors
+        // Network/401 must not stop a locally running timer (screenshots depend on it)
       }
     }, 4000);
     return () => window.clearInterval(id);
@@ -139,9 +149,12 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
       setSyncing(true);
       try {
         ensureToday();
-        const resolvedProjectId = projectId ?? timer.projectId ?? undefined;
+        const resolved =
+          projectId !== undefined ? projectId : timer.projectId;
+        // Keep picker in sync (e.g. timesheet Play / General)
+        setProject(resolved ?? null);
         const apiTimer = await timerApi.start({
-          projectId: resolvedProjectId || undefined,
+          projectId: sanitizeProjectId(resolved),
           description: timer.description || undefined,
         });
         hydrateFromApi(apiTimer);
@@ -155,6 +168,7 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
     [
       ensureToday,
       hydrateFromApi,
+      setProject,
       setSyncing,
       timer.description,
       timer.projectId,

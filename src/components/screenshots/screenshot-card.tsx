@@ -20,6 +20,7 @@ export type ScreenshotItem = {
   imageUrl?: string | null;
   appName?: string | null;
   deleteRequested?: boolean;
+  activityPercent?: number | null;
 };
 
 interface ScreenshotCardProps {
@@ -36,7 +37,7 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
       <div
         role="button"
         tabIndex={0}
-        className="relative block aspect-[179/106] w-full cursor-pointer overflow-hidden rounded-lg bg-[var(--surface-elevated)]"
+        className="group relative block aspect-[179/106] w-full cursor-pointer overflow-hidden rounded-lg bg-[var(--surface-elevated)]"
         onClick={() => setShowDelete((v) => !v)}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -44,7 +45,11 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
             setShowDelete((v) => !v);
           }
         }}
-        aria-label={`Screenshot at ${item.timeLabel}`}
+        aria-label={
+          typeof item.activityPercent === "number"
+            ? `Screenshot at ${item.timeLabel}, ${item.activityPercent}% activity`
+            : `Screenshot at ${item.timeLabel}`
+        }
       >
         {item.imageUrl && !imgFailed ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -52,6 +57,7 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
             src={item.imageUrl}
             alt={item.appName || "Screenshot"}
             className="size-full object-cover"
+            referrerPolicy="no-referrer"
             onError={() => setImgFailed(true)}
           />
         ) : (
@@ -59,6 +65,26 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
             No preview
           </div>
         )}
+
+        {typeof item.activityPercent === "number" && !showDelete ? (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col gap-1 bg-gradient-to-t from-black/75 to-transparent px-2 pb-1.5 pt-6 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100">
+            <div className="h-1 overflow-hidden rounded-full bg-white/30">
+              <div
+                className={`h-full rounded-full ${
+                  item.activityPercent >= 60
+                    ? "bg-emerald-400"
+                    : item.activityPercent >= 25
+                      ? "bg-amber-400"
+                      : "bg-red-400"
+                }`}
+                style={{ width: `${item.activityPercent}%` }}
+              />
+            </div>
+            <span className="text-[10px] font-medium leading-none text-white">
+              {item.activityPercent}% activity
+            </span>
+          </div>
+        ) : null}
 
         {showDelete && (
           <div

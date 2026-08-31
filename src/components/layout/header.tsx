@@ -1,12 +1,12 @@
 /**
- * App header — logo, workspace selector, notifications, overflow menu.
+ * App header — Figma App / Summary + live notifications menu (17655:23528).
  */
 "use client";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { WorkspaceSelector } from "@/components/layout/workspace-selector";
-import { Button } from "@/components/ui/button";
+import { NotificationDropdownList } from "@/components/notification/notification-dropdown";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,17 +15,28 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ROUTES } from "@/constants/routes";
+import { useNotifications } from "@/hooks/useNotifications";
+import { cn } from "@/lib/utils";
 import { authApi } from "@/services/api/auth.api";
 import { disconnectRealtime } from "@/services/realtime/socket";
 import { useAuthStore } from "@/store/auth.store";
-import { useNotificationStore } from "@/store/notification.store";
 import { useTimerStore } from "@/store/timer.store";
+
+const headerIconClass =
+  "inline-flex size-8 shrink-0 items-center justify-center rounded-lg p-2 outline-none transition-colors duration-150 hover:bg-[#f5f5f5] focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35 active:bg-[#efefef]";
 
 export function Header() {
   const router = useRouter();
-  const unreadCount = useNotificationStore((s) => s.unreadCount);
   const clearSession = useAuthStore((s) => s.clearSession);
   const resetTimer = useTimerStore((s) => s.reset);
+  const {
+    notifications,
+    unreadCount,
+    isLoading,
+    error,
+    loadNotifications,
+    markAsRead,
+  } = useNotifications({ poll: true });
 
   const handleSignOut = async () => {
     try {
@@ -41,50 +52,116 @@ export function Header() {
   return (
     <header className="flex w-full items-center justify-between">
       <div className="flex items-center gap-2.5">
-        <Link href={ROUTES.HOME} className="relative size-8 shrink-0 overflow-hidden rounded-lg">
+        <Link
+          href={ROUTES.HOME}
+          className="relative size-8 shrink-0 overflow-hidden rounded-lg outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35"
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/figma/logo.svg" alt="Gr8r" className="size-full object-cover" width={32} height={32} />
+          <img
+            src="/figma/logo.svg"
+            alt="Gr8r"
+            className="size-full object-cover"
+            width={32}
+            height={32}
+          />
         </Link>
         <WorkspaceSelector />
       </div>
 
-      <div className="flex items-center gap-1">
-        <Button
-          variant="outline"
-          size="icon"
-          className="relative size-8 rounded-lg border-[var(--border-subtle)] bg-white shadow-none"
-          onClick={() => router.push(ROUTES.NOTIFICATIONS)}
-          aria-label="Notifications"
+      <div className="flex items-center gap-2">
+        <DropdownMenu
+          onOpenChange={(open) => {
+            if (open) void loadNotifications();
+          }}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/figma/icon-bell.svg" alt="" className="size-4" width={16} height={16} />
-          {unreadCount > 0 && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src="/figma/icon-bell-dot.svg"
-              alt=""
-              className="absolute right-1.5 top-1.5 size-1.5"
-              width={6}
-              height={6}
-            />
-          )}
-        </Button>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                headerIconClass,
+                "cursor-pointer border border-[#ededed] bg-white hover:border-[#e6e6e6] data-[state=open]:bg-[#f5f5f5]",
+              )}
+              aria-label={
+                unreadCount > 0
+                  ? `Notifications, ${unreadCount} unread`
+                  : "Notifications"
+              }
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={
+                  unreadCount > 0
+                    ? "/figma/icon-bell-unread.svg"
+                    : "/figma/icon-bell.svg"
+                }
+                alt=""
+                className="size-4 object-contain"
+                width={16}
+                height={16}
+              />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            sideOffset={8}
+            className="w-[281px] min-w-[281px] max-h-[360px] overflow-y-auto overflow-x-hidden rounded-xl border border-[#e6e6e6] bg-white p-0 shadow-[0_1px_1px_rgba(0,0,0,0.03),0_4px_2px_rgba(0,0,0,0.03),0_9px_2.5px_rgba(0,0,0,0.02)]"
+          >
+            {isLoading && notifications.length === 0 ? (
+              <div className="px-3 py-6 text-center text-xs text-[#99a1af]">
+                Loading…
+              </div>
+            ) : error && notifications.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 px-3 py-6">
+                <p className="text-center text-xs text-[#99a1af]">{error}</p>
+                <button
+                  type="button"
+                  className="text-xs font-medium text-[#2b7fff]"
+                  onClick={() => void loadNotifications()}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : (
+              <NotificationDropdownList
+                notifications={notifications}
+                onSelect={(n) => {
+                  if (!n.read) void markAsRead(n.id);
+                }}
+              />
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-8 rounded-lg"
+            <button
+              type="button"
+              className={cn(
+                headerIconClass,
+                "cursor-pointer bg-transparent data-[state=open]:bg-[#f5f5f5]",
+              )}
               aria-label="More"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/figma/icon-more.svg" alt="" className="size-4" width={16} height={16} />
-            </Button>
+              <img
+                src="/figma/icon-more.svg"
+                alt=""
+                className="size-4 object-contain"
+                width={16}
+                height={16}
+              />
+            </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
-            <DropdownMenuItem onClick={() => router.push(ROUTES.PROFILE)}>Profile</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => router.push(ROUTES.SETTINGS)}>Settings</DropdownMenuItem>
+          <DropdownMenuContent
+            align="end"
+            className="w-44 rounded-lg border-[#ededed]"
+          >
+            <DropdownMenuItem onClick={() => router.push(ROUTES.PROFILE)}>
+              Profile
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push(ROUTES.SETTINGS)}>
+              Settings
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={() => router.push(ROUTES.NOTIFICATIONS)}>
               Notifications
             </DropdownMenuItem>

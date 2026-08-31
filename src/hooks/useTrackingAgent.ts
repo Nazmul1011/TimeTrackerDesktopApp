@@ -7,7 +7,9 @@
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { activityApi } from "@/services/api/activity.api";
+import { authApi } from "@/services/api/auth.api";
 import { monitoringApi, type MonitoringConfig } from "@/services/api/monitoring.api";
+import { timerApi } from "@/services/api/timer.api";
 import { ensureDeviceId, getApiBaseUrl } from "@/services/api/client";
 import { STORAGE_KEYS } from "@/constants/storage";
 import { getElectronAPI, isElectron } from "@/services/electron";
@@ -26,25 +28,24 @@ type Sample = {
 const ACTIVITY_SAMPLE_MS = 10_000;
 const HEARTBEAT_MS = 60_000;
 const FLUSH_MS = 30_000;
-const IDLE_THRESHOLD_SEC = 180;
 const FIRST_SCREENSHOT_MS = 3_000;
+const TOKEN_REFRESH_MS = 8 * 60_000;
+const CONFIG_POLL_MS = 30_000;
 
 export const SCREENSHOT_CAPTURED_EVENT = "gr8r:screenshot-captured";
 
 function resolveScreenshotIntervalMs(cfg: MonitoringConfig | null): number {
-  const envSeconds = Number(
-    process.env.NEXT_PUBLIC_SCREENSHOT_INTERVAL_SEC ?? "",
+  const minutes = Number(cfg?.screenshotInterval);
+  const safeMinutes =
+    Number.isFinite(minutes) && minutes > 0 ? Math.min(60, Math.max(1, minutes)) : 5;
+  return safeMinutes * 60_000;
+}
+
+function screenshotsAllowed(cfg: MonitoringConfig | null): boolean {
+  return (
+    process.env.NEXT_PUBLIC_ENABLE_SCREENSHOTS !== "false" &&
+    cfg?.screenshotEnabled !== false
   );
-  if (Number.isFinite(envSeconds) && envSeconds > 0) {
-    return Math.max(15, envSeconds) * 1000;
-  }
-
-  if (process.env.NEXT_PUBLIC_APP_ENV !== "production") {
-    return 60_000;
-  }
-
-  const minutes = Math.max(1, Number(cfg?.screenshotInterval ?? 10));
-  return minutes * 60_000;
 }
 
 export function useTrackingAgent() {
@@ -77,7 +78,7 @@ export function useTrackingAgent() {
           configRef.current = {
             activityMonitoringEnabled: true,
             screenshotEnabled: true,
-            screenshotInterval: 1,
+            screenshotInterval: 5,
           };
         }
       });
@@ -94,12 +95,86 @@ export function useTrackingAgent() {
     if (!api?.tracking) return;
     void api.tracking.updateAuth({
       accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
       organizationId,
       deviceId: ensureDeviceId(),
       sessionToken: tokens.sessionToken,
       apiBaseUrl: getApiBaseUrl(),
     });
-  }, [tokens.accessToken, tokens.sessionToken, organizationId]);
+  }, [tokens.accessToken, tokens.refreshToken, tokens.sessionToken, organizationId]);
+
+  // Keep access tokens fresh — JWT expires in 15m and main-process uploads
+  // use a snapshot of the token that otherwise goes stale.
+  useEffect(() => {
+    if (!isElectron()) return;
+    const api = getElectronAPI();
+    if (!api?.tracking) return;
+
+    const pushAuthToMain = (accessToken?: string | null) => {
+      const state = useAuthStore.getState();
+      const token =
+        accessToken ||
+        state.tokens.accessToken ||
+        localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+      if (!token) return;
+      void api.tracking.updateAuth({
+        accessToken: token,
+        refreshToken:
+          state.tokens.refreshToken ||
+          localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN),
+        organizationId: state.organizationId ?? undefined,
+        deviceId: ensureDeviceId(),
+        sessionToken: state.tokens.sessionToken,
+        apiBaseUrl: getApiBaseUrl(),
+      });
+    };
+
+    const applyAccessToken = (accessToken: string) => {
+      useAuthStore.getState().setSession({ accessToken });
+      pushAuthToMain(accessToken);
+    };
+
+    const refreshNow = async () => {
+      const refreshToken =
+        useAuthStore.getState().tokens.refreshToken ||
+        localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN);
+      if (!refreshToken) return;
+      try {
+        const refreshed = await authApi.refresh(refreshToken);
+        applyAccessToken(refreshed.access_token);
+      } catch (err) {
+        console.warn("[tracking] token refresh failed", err);
+      }
+    };
+
+    const unsubExpired = api.tracking.onAuthExpired?.(() => {
+      void refreshNow();
+    });
+
+    const unsubRefreshed = api.tracking.onTokenRefreshed?.((payload) => {
+      if (payload?.accessToken) {
+        applyAccessToken(payload.accessToken);
+      }
+    });
+
+    const onAxiosRefresh = (event: Event) => {
+      const accessToken = (event as CustomEvent<{ accessToken?: string }>).detail
+        ?.accessToken;
+      if (accessToken) applyAccessToken(accessToken);
+    };
+    window.addEventListener("auth:token-refreshed", onAxiosRefresh);
+
+    const refreshId = window.setInterval(() => {
+      void refreshNow();
+    }, TOKEN_REFRESH_MS);
+
+    return () => {
+      unsubExpired?.();
+      unsubRefreshed?.();
+      window.removeEventListener("auth:token-refreshed", onAxiosRefresh);
+      window.clearInterval(refreshId);
+    };
+  }, []);
 
   // Main-process screenshot agent while timer is running
   useEffect(() => {
@@ -108,19 +183,6 @@ export function useTrackingAgent() {
 
     const api = getElectronAPI();
     if (!api?.tracking) return;
-
-    const accessToken =
-      tokens.accessToken || localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-    if (!accessToken) return;
-
-    const enableScreenshots =
-      process.env.NEXT_PUBLIC_ENABLE_SCREENSHOTS !== "false";
-    const screenshotsAllowed =
-      enableScreenshots &&
-      !(
-        configRef.current?.screenshotEnabled === false &&
-        process.env.NEXT_PUBLIC_APP_ENV === "production"
-      );
 
     firstUploadToastRef.current = false;
     let cancelled = false;
@@ -148,33 +210,103 @@ export function useTrackingAgent() {
       }
     });
 
-    const boot = window.setTimeout(() => {
+    const unsubIdle = api.tracking.onIdleTimeout?.((payload) => {
       if (cancelled) return;
+      if (useTimerStore.getState().timer.status !== "running") return;
+      void (async () => {
+        try {
+          const apiTimer = await timerApi.pause();
+          useTimerStore.getState().hydrateFromApi(apiTimer);
+          const minutes = Math.max(
+            1,
+            Math.round((payload?.intervalMs ?? 5 * 60_000) / 60_000),
+          );
+          toast.warning(
+            `Timer paused — no mouse or keyboard activity for ${minutes} min`,
+          );
+        } catch (err) {
+          console.warn("[tracking] idle auto-pause failed", err);
+        }
+      })();
+    });
+
+    const startTracking = (cfg: MonitoringConfig | null) => {
+      const state = useAuthStore.getState();
+      const token =
+        state.tokens.accessToken ||
+        localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+      if (!token) return;
+
+      const intervalMs = resolveScreenshotIntervalMs(cfg);
       void api.tracking.start({
-        accessToken,
-        organizationId,
+        accessToken: token,
+        refreshToken:
+          state.tokens.refreshToken ||
+          localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN),
+        organizationId: state.organizationId || organizationId,
         deviceId: ensureDeviceId(),
-        sessionToken: tokens.sessionToken,
+        sessionToken: state.tokens.sessionToken,
         apiBaseUrl: getApiBaseUrl(),
-        screenshotIntervalMs: resolveScreenshotIntervalMs(configRef.current),
-        enableScreenshots: screenshotsAllowed,
+        screenshotIntervalMs: intervalMs,
+        enableScreenshots: screenshotsAllowed(cfg),
         firstScreenshotDelayMs: FIRST_SCREENSHOT_MS,
       });
-    }, 300);
+    };
+
+    const boot = async () => {
+      let cfg = configRef.current;
+      if (!cfg) {
+        try {
+          cfg = await monitoringApi.getConfig();
+        } catch {
+          cfg = {
+            activityMonitoringEnabled: true,
+            screenshotEnabled: true,
+            screenshotInterval: 5,
+          };
+        }
+        if (cancelled) return;
+        configRef.current = cfg;
+      }
+      if (cancelled) return;
+      startTracking(cfg);
+    };
+
+    void boot();
+
+    const pollId = window.setInterval(() => {
+      void (async () => {
+        try {
+          const cfg = await monitoringApi.getConfig();
+          if (cancelled) return;
+          const prev = configRef.current;
+          const intervalChanged =
+            resolveScreenshotIntervalMs(prev) !==
+            resolveScreenshotIntervalMs(cfg);
+          const enabledChanged =
+            screenshotsAllowed(prev) !== screenshotsAllowed(cfg);
+          configRef.current = cfg;
+          if (intervalChanged || enabledChanged) {
+            startTracking(cfg);
+          }
+        } catch {
+          // keep the running interval if config refresh fails
+        }
+      })();
+    }, CONFIG_POLL_MS);
 
     return () => {
       cancelled = true;
-      window.clearTimeout(boot);
+      window.clearInterval(pollId);
       unsubUploaded();
       unsubFailed();
+      unsubIdle?.();
       void api.tracking.stop();
     };
   }, [
     isAuthenticated,
     organizationId,
     timerStatus,
-    tokens.accessToken,
-    tokens.sessionToken,
   ]);
 
   // Activity sampling + heartbeat (renderer)
@@ -211,7 +343,9 @@ export function useTrackingAgent() {
       }
 
       try {
-        const idle = await api.activity.getIdleState(IDLE_THRESHOLD_SEC);
+        const idle = await api.activity.getIdleState(
+          Math.max(1, Math.round(ACTIVITY_SAMPLE_MS / 1000)),
+        );
         const win = await api.activity.getActiveWindow();
         const now = Date.now();
         const prev = lastSampleRef.current;

@@ -1,22 +1,32 @@
 /**
- * Notifications page — Figma settings toggles + inbox list.
+ * Notifications page — settings toggles + live inbox from backend.
  */
 "use client";
 
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { ROUTES } from "@/constants/routes";
+import { useNotifications } from "@/hooks/useNotifications";
 import { useSettingsStore } from "@/store/settings.store";
-import { useNotificationStore } from "@/store/notification.store";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 export default function NotificationsPage() {
   const router = useRouter();
   const settings = useSettingsStore((s) => s.settings);
   const setSettings = useSettingsStore((s) => s.setSettings);
-  const notifications = useNotificationStore((s) => s.notifications);
-  const setNotifications = useNotificationStore((s) => s.setNotifications);
+  const {
+    notifications,
+    isLoading,
+    error,
+    loadNotifications,
+    markAsRead,
+  } = useNotifications({ poll: true });
+
+  useEffect(() => {
+    void loadNotifications();
+  }, [loadNotifications]);
 
   return (
     <div className="app-shell">
@@ -60,7 +70,20 @@ export default function NotificationsPage() {
         <div className="px-4 py-3">
           <p className="mb-2 text-xs font-medium text-[#1e2939]">Inbox</p>
           <ScrollArea className="h-[220px]">
-            {notifications.length === 0 ? (
+            {isLoading && notifications.length === 0 ? (
+              <p className="py-6 text-center text-xs text-[var(--text-muted)]">Loading…</p>
+            ) : error && notifications.length === 0 ? (
+              <div className="py-6 text-center">
+                <p className="text-xs text-[var(--text-muted)]">{error}</p>
+                <button
+                  type="button"
+                  className="mt-2 text-xs text-[var(--brand)]"
+                  onClick={() => void loadNotifications()}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : notifications.length === 0 ? (
               <p className="py-6 text-center text-xs text-[var(--text-muted)]">No notifications</p>
             ) : (
               <ul className="space-y-3">
@@ -72,13 +95,7 @@ export default function NotificationsPage() {
                       <button
                         type="button"
                         className="mt-2 text-[11px] text-[var(--brand)]"
-                        onClick={() =>
-                          setNotifications(
-                            notifications.map((x) =>
-                              x.id === n.id ? { ...x, read: true } : x,
-                            ),
-                          )
-                        }
+                        onClick={() => void markAsRead(n.id)}
                       >
                         Mark as read
                       </button>

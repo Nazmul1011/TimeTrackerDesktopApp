@@ -62,7 +62,7 @@ export function WorkspaceSelector() {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex items-center gap-2 rounded-full border border-[#e6e6e6] bg-[#f5f5f5] px-2 py-1.5 outline-none transition hover:bg-[#efefef]"
+          className="flex items-center gap-2 rounded-full border border-[#e6e6e6] bg-[#f5f5f5] px-2 py-1.5 outline-none transition-colors duration-150 hover:bg-[#efefef] focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35 data-[state=open]:bg-[#efefef]"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -77,7 +77,7 @@ export function WorkspaceSelector() {
           </span>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="/figma/icon-chevron.svg"
+            src="/figma/icon-chevron-16.svg"
             alt=""
             className="size-4 opacity-70"
             width={16}

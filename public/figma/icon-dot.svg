@@ -1,3 +1,5 @@
-<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="4" height="4" viewBox="0 0 4 4" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path id="icon" d="M2 4C3.10457 4 4 3.10457 4 2C4 0.89543 3.10457 0 2 0C0.89543 0 0 0.89543 0 2C0 3.10457 0.89543 4 2 4Z" fill="#2B7FFF" style="fill:#2B7FFF;fill:color(display-p3 0.1693 0.4980 1.0000);fill-opacity:1;"/>
+<svg preserveAspectRatio="xMidYMid meet" width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Icons / Dot-mark">
+<path id="icon" d="M6 8C7.10457 8 8 7.10457 8 6C8 4.89543 7.10457 4 6 4C4.89543 4 4 4.89543 4 6C4 7.10457 4.89543 8 6 8Z" fill="#2B7FFF"/>
+</g>
 </svg>
