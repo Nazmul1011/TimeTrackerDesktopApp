@@ -1,6 +1,6 @@
 /**
  * Screenshot capture via Electron desktopCapturer, with OS CLI fallbacks.
- * Linux/Wayland often returns empty thumbnails — fall back to import/xwd/gdbus.
+ * macOS requires Screen Recording permission (TCC) for both paths.
  */
 import { desktopCapturer, screen } from "electron";
 import { execFile } from "child_process";
@@ -9,6 +9,7 @@ import fs from "fs/promises";
 import os from "os";
 import path from "path";
 import log from "electron-log/main";
+import { MacPermissions } from "../mac-permissions";
 
 const execFileAsync = promisify(execFile);
 
@@ -40,6 +41,7 @@ const EXEC_ENV = {
 
 export class ScreenshotService {
   private static instance: ScreenshotService | null = null;
+  private macPermissionWarned = false;
 
   static getInstance(): ScreenshotService {
     if (!ScreenshotService.instance) {
@@ -50,6 +52,19 @@ export class ScreenshotService {
 
   async capture(): Promise<CapturedScreenshot | null> {
     const capturedAt = new Date().toISOString();
+
+    if (process.platform === "darwin") {
+      // Probe / log TCC status. Always attempt capture — first call triggers the prompt.
+      const allowed = await MacPermissions.ensureScreenRecording();
+      if (!allowed && !this.macPermissionWarned) {
+        this.macPermissionWarned = true;
+        log.warn(
+          "[ScreenshotService] Screen Recording denied — enable it in System Settings → Privacy & Security → Screen Recording for Electron/Gr8r, then fully quit and reopen the app",
+        );
+        void MacPermissions.openScreenRecordingSettings();
+      }
+    }
+
     const isWayland = Boolean(process.env.WAYLAND_DISPLAY);
     const order = isWayland
       ? (["cli", "electron"] as const)
@@ -68,6 +83,16 @@ export class ScreenshotService {
           shot.height,
         );
         return { ...shot, capturedAt };
+      }
+    }
+
+    if (process.platform === "darwin" && !this.macPermissionWarned) {
+      const status = MacPermissions.getScreenStatus();
+      if (status !== "granted") {
+        this.macPermissionWarned = true;
+        log.warn(
+          `[ScreenshotService] capture failed (screen status=${status}) — grant Screen Recording and restart`,
+        );
       }
     }
 
@@ -180,9 +205,16 @@ export class ScreenshotService {
         );
       }
     } else if (process.platform === "darwin") {
-      commands.push({ bin: "screencapture", args: ["-x", tmpPath] });
+      // Silent PNG capture of the full desktop (triggers Screen Recording TCC).
+      commands.push({
+        bin: "/usr/sbin/screencapture",
+        args: ["-x", "-t", "png", tmpPath],
+      });
+      commands.push({
+        bin: "screencapture",
+        args: ["-x", "-t", "png", tmpPath],
+      });
     } else if (process.platform === "win32") {
-      // Escape for single-quoted PowerShell string; capture full virtual desktop.
       const safePath = tmpPath.replace(/'/g, "''");
       const ps = `
 $ErrorActionPreference = 'Stop'
@@ -219,6 +251,8 @@ $g.Dispose(); $bmp.Dispose()
           log.warn(`[ScreenshotService] ${cmd.bin} wrote tiny file`);
           continue;
         }
+        // Unlink after successful read (do not use finally — that raced the next attempt).
+        void fs.unlink(tmpPath).catch(() => undefined);
         return {
           buffer,
           width: 0,
@@ -226,7 +260,6 @@ $g.Dispose(); $bmp.Dispose()
         };
       } catch (error) {
         log.debug(`[ScreenshotService] ${cmd.bin} unavailable/failed`, error);
-      } finally {
         void fs.unlink(tmpPath).catch(() => undefined);
       }
     }

@@ -56,14 +56,28 @@ async function bootstrap(): Promise<void> {
   registerIpcHandlers();
   SettingsService.getInstance().applyStoredLoginItem();
 
+  if (process.platform === "darwin") {
+    try {
+      const { findExistingPath, resolveAppIconPaths } = await import("../utils");
+      const iconPath = findExistingPath(resolveAppIconPaths());
+      if (iconPath && app.dock) {
+        const { nativeImage } = await import("electron");
+        const image = nativeImage.createFromPath(iconPath);
+        if (!image.isEmpty()) app.dock.setIcon(image);
+      }
+    } catch (error) {
+      log.warn("[main] dock icon failed", error);
+    }
+  }
+
   mainWindow = createMainWindow();
 
-  // Keep tracking alive when the user closes the window — hide to tray instead.
+  // Keep tracking alive when the user closes the window — hide to tray/dock instead.
   mainWindow.on("close", (event) => {
     if (isQuitting) return;
     event.preventDefault();
     mainWindow?.hide();
-    log.info("[main] window hidden to tray (tracking continues)");
+    log.info("[main] window hidden (tracking continues)");
   });
 
   createAppMenu(mainWindow);

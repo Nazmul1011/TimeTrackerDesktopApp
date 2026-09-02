@@ -58,7 +58,9 @@ export class IdleService {
           ? " + xinput"
           : process.platform === "win32"
             ? " + Win GetLastInputInfo via powerMonitor"
-            : " + OS idle reset") +
+            : process.platform === "darwin"
+              ? " + macOS CGEventSource idle via powerMonitor"
+              : " + OS idle reset") +
         ")",
     );
   }

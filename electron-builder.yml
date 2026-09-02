@@ -23,6 +23,14 @@ mac:
     - dmg
     - zip
   icon: resources/icons/icon.icns
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    NSAppleEventsUsageDescription: Gr8r Time Tracker needs Automation access to detect which application you are using while the timer is running.
+    NSScreenCaptureDescription: Gr8r Time Tracker needs Screen Recording permission to capture work screenshots while the timer is running.
+    LSApplicationCategoryType: public.app-category.productivity
 
 win:
   target:

@@ -48,8 +48,10 @@ export class WindowRevealService {
 
     if (process.platform === "win32") {
       this.revealWindows(win);
+    } else if (process.platform === "darwin") {
+      this.revealMac(win);
     } else {
-      this.revealUnix(win);
+      this.revealLinux(win);
     }
 
     log.info("[WindowRevealService] revealed main window");
@@ -63,7 +65,7 @@ export class WindowRevealService {
     try {
       win.moveTop();
     } catch {
-      // moveTop may be unavailable on some Electron builds
+      // ignore
     }
     win.flashFrame(true);
 
@@ -75,7 +77,34 @@ export class WindowRevealService {
     }, 1200);
   }
 
-  private revealUnix(win: BrowserWindow): void {
+  private revealMac(win: BrowserWindow): void {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    win.setAlwaysOnTop(true, "floating");
+    win.focus();
+
+    try {
+      app.dock?.show();
+      app.focus({ steal: true });
+      app.dock?.bounce("informational");
+    } catch {
+      try {
+        app.focus();
+      } catch {
+        // ignore
+      }
+    }
+
+    setTimeout(() => {
+      if (win.isDestroyed()) return;
+      win.setAlwaysOnTop(false);
+      win.setVisibleOnAllWorkspaces(false);
+      win.focus();
+    }, 1000);
+  }
+
+  private revealLinux(win: BrowserWindow): void {
     if (win.isMinimized()) win.restore();
     win.show();
     win.setVisibleOnAllWorkspaces(true);

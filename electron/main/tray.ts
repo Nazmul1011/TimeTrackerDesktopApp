@@ -1,5 +1,5 @@
 /**
- * System tray — show/quit + Windows-friendly icon (.ico).
+ * System tray — platform-aware icons and show/quit.
  */
 import { Tray, Menu, BrowserWindow, nativeImage, app } from "electron";
 import path from "path";
@@ -23,13 +23,25 @@ function loadTrayIcon(): Electron.NativeImage {
           path.join(root, "tray", "tray-icon.png"),
           path.join(root, "icons", "icon.png"),
         ]
-      : resolveAppIconPaths();
+      : process.platform === "darwin"
+        ? [
+            path.join(root, "tray", "tray-icon.png"),
+            path.join(root, "icons", "icon.png"),
+            path.join(root, "icons", "256x256.png"),
+          ]
+        : resolveAppIconPaths();
 
   const iconPath = findExistingPath(candidates);
   if (iconPath) {
-    const icon = nativeImage.createFromPath(iconPath);
+    let icon = nativeImage.createFromPath(iconPath);
     if (!icon.isEmpty()) {
-      return process.platform === "win32" ? icon.resize({ width: 16, height: 16 }) : icon;
+      if (process.platform === "win32") {
+        icon = icon.resize({ width: 16, height: 16 });
+      } else if (process.platform === "darwin") {
+        // Colored brand icon — do NOT mark as template (template needs monochrome).
+        icon = icon.resize({ width: 22, height: 22 });
+      }
+      return icon;
     }
   }
 
@@ -42,16 +54,7 @@ function showMainWindow(mainWindow: BrowserWindow): void {
     WindowRevealService.getInstance().revealNow();
     return;
   }
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
-  if (process.platform === "win32") {
-    try {
-      mainWindow.moveTop();
-    } catch {
-      // ignore
-    }
-  }
+  WindowRevealService.getInstance().revealNow();
 }
 
 export function createTray(mainWindow: BrowserWindow): Tray | null {
@@ -61,7 +64,7 @@ export function createTray(mainWindow: BrowserWindow): Tray | null {
 
     const contextMenu = Menu.buildFromTemplate([
       {
-        label: "Show",
+        label: "Show Gr8r Time Tracker",
         click: () => showMainWindow(mainWindow),
       },
       { type: "separator" },
@@ -76,7 +79,8 @@ export function createTray(mainWindow: BrowserWindow): Tray | null {
     tray.setContextMenu(contextMenu);
     tray.on("double-click", () => showMainWindow(mainWindow));
     tray.on("click", () => {
-      if (process.platform === "win32") showMainWindow(mainWindow);
+      // Windows & Linux: click shows. macOS: click opens context menu by default.
+      if (process.platform !== "darwin") showMainWindow(mainWindow);
     });
 
     log.info("[tray] Tray initialized");

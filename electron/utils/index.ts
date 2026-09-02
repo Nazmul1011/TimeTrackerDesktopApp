@@ -13,7 +13,7 @@ export function getResourcesRoot(): string {
   return path.join(__dirname, "../../resources");
 }
 
-/** Prefer .ico on Windows for tray/taskbar; PNG elsewhere. */
+/** Prefer platform-native icon formats. */
 export function resolveAppIconPaths(): string[] {
   const root = getResourcesRoot();
   if (process.platform === "win32") {
@@ -23,6 +23,14 @@ export function resolveAppIconPaths(): string[] {
       path.join(root, "icons", "icon.png"),
       path.join(root, "tray", "tray-icon.png"),
       path.join(root, "icons", "256x256.png"),
+    ];
+  }
+  if (process.platform === "darwin") {
+    return [
+      path.join(root, "icons", "icon.icns"),
+      path.join(root, "icons", "icon.png"),
+      path.join(root, "icons", "256x256.png"),
+      path.join(root, "tray", "tray-icon.png"),
     ];
   }
   return [

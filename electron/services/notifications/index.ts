@@ -76,6 +76,11 @@ export class NotificationService {
       return { ok: true };
     }
 
+    if (process.platform === "darwin") {
+      void this.showMacOsascriptFallback(safeTitle, safeBody);
+      return { ok: true };
+    }
+
     log.warn("[NotificationService] not supported on this platform");
     return { ok: false, message: "Notifications not supported" };
   }
@@ -115,10 +120,19 @@ export class NotificationService {
           void this.showLinuxNotifySend(title, body, options?.urgency);
         } else if (process.platform === "win32") {
           void this.showWindowsToastFallback(title, body);
+        } else if (process.platform === "darwin") {
+          void this.showMacOsascriptFallback(title, body);
         }
       });
 
       notification.show();
+      if (process.platform === "darwin") {
+        try {
+          app.dock?.bounce("critical");
+        } catch {
+          // ignore
+        }
+      }
       log.info("[NotificationService] shown via Electron", { title, body });
       return { ok: true };
     } catch (error) {
@@ -146,6 +160,31 @@ export class NotificationService {
       return true;
     } catch (error) {
       log.warn("[NotificationService] notify-send failed", error);
+      return false;
+    }
+  }
+
+  /**
+   * macOS Notification Center via AppleScript (fallback when Electron toast fails).
+   */
+  private async showMacOsascriptFallback(
+    title: string,
+    body: string,
+  ): Promise<boolean> {
+    try {
+      const escapeAs = (value: string) =>
+        value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      const script = `display notification "${escapeAs(body)}" with title "${escapeAs(title)}" sound name "Glass"`;
+      await execFileAsync("osascript", ["-e", script], { timeout: 3000 });
+      try {
+        app.dock?.bounce("critical");
+      } catch {
+        // ignore
+      }
+      log.info("[NotificationService] shown via osascript", { title, body });
+      return true;
+    } catch (error) {
+      log.warn("[NotificationService] osascript notification failed", error);
       return false;
     }
   }
@@ -224,7 +263,17 @@ $notifier.Show($toast)
   }
 
   private resolveIcon(): string | Electron.NativeImage | undefined {
-    const file = this.resolveIconPath();
+    // Prefer PNG for Electron Notification (icns can fail to decode as toast icon).
+    const root = getResourcesRoot();
+    const preferred =
+      process.platform === "darwin"
+        ? [
+            path.join(root, "icons", "icon.png"),
+            path.join(root, "icons", "256x256.png"),
+            path.join(root, "tray", "tray-icon.png"),
+          ]
+        : resolveAppIconPaths();
+    const file = findExistingPath(preferred) ?? this.resolveIconPath();
     if (!file) return undefined;
     try {
       const image = nativeImage.createFromPath(file);

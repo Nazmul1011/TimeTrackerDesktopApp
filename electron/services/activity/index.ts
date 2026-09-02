@@ -98,22 +98,101 @@ export class ActivityService {
   }
 
   private async getMacActiveWindow(): Promise<ActiveWindowInfo> {
-    const script = `
-      tell application "System Events"
-        set frontApp to first application process whose frontmost is true
-        set appName to name of frontApp
-        set winTitle to ""
-        try
-          set winTitle to name of front window of frontApp
-        end try
-        return appName & "|||" & winTitle
-      end tell
-    `;
-    const { stdout } = await execFileAsync("osascript", ["-e", script], {
-      timeout: 2000,
-    });
-    const [appName, windowTitle = ""] = stdout.trim().split("|||");
-    return { appName: appName || "Desktop", windowTitle };
+    // Fast path: NSWorkspace app name (no Accessibility required).
+    const nsWorkspace = await this.getMacAppNameViaNSWorkspace();
+
+    const jxaPath = path.join(
+      getResourcesRoot(),
+      "scripts",
+      "get-active-window.jxa",
+    );
+    const scptPath = path.join(
+      getResourcesRoot(),
+      "scripts",
+      "get-active-window.applescript",
+    );
+
+    try {
+      const { stdout } = await execFileAsync(
+        "osascript",
+        ["-l", "JavaScript", jxaPath],
+        { timeout: 2500 },
+      );
+      const parsed = this.parseMacWindowOutput(stdout);
+      if (parsed.appName && parsed.appName !== "Desktop") {
+        return parsed;
+      }
+      if (nsWorkspace) {
+        return { appName: nsWorkspace, windowTitle: parsed.windowTitle || "" };
+      }
+      return parsed;
+    } catch (error) {
+      log.debug("[ActivityService] JXA active window failed", error);
+    }
+
+    try {
+      const { stdout } = await execFileAsync("osascript", [scptPath], {
+        timeout: 2500,
+      });
+      const parsed = this.parseMacWindowOutput(stdout);
+      if (parsed.appName && parsed.appName !== "Desktop") return parsed;
+      if (nsWorkspace) {
+        return { appName: nsWorkspace, windowTitle: parsed.windowTitle || "" };
+      }
+      return parsed;
+    } catch (error) {
+      log.debug("[ActivityService] AppleScript active window failed", error);
+    }
+
+    if (nsWorkspace) {
+      return { appName: nsWorkspace, windowTitle: "" };
+    }
+
+    log.warn(
+      "[ActivityService] macOS active window unavailable — grant Accessibility for window titles if needed",
+    );
+    return { appName: "Desktop", windowTitle: "" };
+  }
+
+  private async getMacAppNameViaNSWorkspace(): Promise<string | null> {
+    try {
+      const { stdout } = await execFileAsync(
+        "osascript",
+        [
+          "-l",
+          "JavaScript",
+          "-e",
+          'ObjC.import("AppKit"); var a=$.NSWorkspace.sharedWorkspace.frontmostApplication; var n=ObjC.unwrap(a.localizedName); var b=ObjC.unwrap(a.bundleIdentifier); (n&&String(n))||(b&&String(b))||""',
+        ],
+        { timeout: 2000 },
+      );
+      const name = stdout.trim();
+      return name.length > 0 ? name : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private parseMacWindowOutput(stdout: string): ActiveWindowInfo {
+    const line =
+      stdout
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .find((s) => s.includes("\u001e") || s.includes("|||")) ??
+      stdout.trim();
+
+    if (line.includes("\u001e")) {
+      const sep = line.indexOf("\u001e");
+      return {
+        appName: line.slice(0, sep).trim() || "Desktop",
+        windowTitle: line.slice(sep + 1).trim(),
+      };
+    }
+    if (line.includes("|||")) {
+      const [appName, windowTitle = ""] = line.split("|||");
+      return { appName: appName || "Desktop", windowTitle };
+    }
+    return { appName: line || "Desktop", windowTitle: "" };
   }
 
   /**

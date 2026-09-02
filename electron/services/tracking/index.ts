@@ -9,6 +9,7 @@ import { ActivityService } from "../activity";
 import { InputActivityMonitor } from "../input-activity";
 import { NotificationService } from "../notifications";
 import { WindowRevealService } from "../window-reveal";
+import { MacPermissions } from "../mac-permissions";
 
 export type TrackingAuth = {
   accessToken: string;
@@ -105,6 +106,18 @@ export class TrackingService {
     };
     this.running = true;
     this.idlePauseInFlight = false;
+
+    if (process.platform === "darwin" && this.options.enableScreenshots) {
+      // Await probe so the first screenshot is more likely after TCC prompt.
+      void (async () => {
+        const ok = await MacPermissions.ensureScreenRecording();
+        if (!ok) {
+          log.warn(
+            "[TrackingService] macOS Screen Recording denied — screenshots will fail until enabled in System Settings and the app is restarted",
+          );
+        }
+      })();
+    }
 
     ActivityService.getInstance().start();
     const idleMs = this.options.idleTimeoutMs ?? 0;

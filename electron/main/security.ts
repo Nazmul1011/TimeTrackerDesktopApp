@@ -31,16 +31,18 @@ export function applySecurityDefaults(): void {
       return (
         name === "media" ||
         name === "display-capture" ||
-        name === "fullscreen"
+        name === "fullscreen" ||
+        name === "notifications"
       );
     });
 
     session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
-      // Allow display capture for screenshots; deny everything else by default
+      // Allow display capture for screenshots + OS notifications
       if (
         permission === "media" ||
         permission === "display-capture" ||
-        permission === "fullscreen"
+        permission === "fullscreen" ||
+        permission === "notifications"
       ) {
         callback(true);
         return;
