@@ -15,6 +15,7 @@ import { initAutoUpdater } from "./updater";
 import { applySecurityDefaults } from "./security";
 import { registerIpcHandlers } from "../ipc";
 import { initDatabase } from "../database/sqlite";
+import { SettingsService } from "../services/settings";
 
 loadEnv();
 
@@ -22,8 +23,17 @@ log.transports.file.level = "info";
 log.info("[main] Starting Gr8r Time Tracker desktop client");
 
 if (process.platform === "linux") {
-  app.commandLine.appendSwitch("enable-features", "WebRTCPipeWireCapturer");
+  app.commandLine.appendSwitch(
+    "enable-features",
+    "WebRTCPipeWireCapturer,AllowSystemNotifications",
+  );
 }
+
+if (process.platform === "win32") {
+  app.setAppUserModelId("com.gr8r.timetracker");
+}
+
+app.setName("Gr8r Time Tracker");
 
 // Single instance lock
 const gotLock = app.requestSingleInstanceLock();
@@ -45,6 +55,7 @@ async function bootstrap(): Promise<void> {
   applySecurityDefaults();
   initDatabase();
   registerIpcHandlers();
+  SettingsService.getInstance().applyStoredLoginItem();
 
   mainWindow = createMainWindow();
   createAppMenu(mainWindow);

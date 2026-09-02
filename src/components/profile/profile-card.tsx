@@ -9,12 +9,14 @@ interface ProfileCardProps {
   name?: string;
   email?: string;
   workspace?: string;
+  jobTitle?: string;
 }
 
 export function ProfileCard({
   name = "User",
   email = "user@example.com",
   workspace,
+  jobTitle,
 }: ProfileCardProps) {
   const initials = name
     .split(" ")
@@ -31,6 +33,9 @@ export function ProfileCard({
       <div className="space-y-1">
         <p className="text-lg font-semibold text-[#1e2939]">{name}</p>
         <p className="text-sm text-[var(--text-subtle)]">{email}</p>
+        {jobTitle ? (
+          <p className="text-xs text-[var(--text-muted)]">{jobTitle}</p>
+        ) : null}
         {workspace && <p className="text-xs text-[var(--text-muted)]">{workspace}</p>}
       </div>
     </div>

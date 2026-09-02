@@ -11,6 +11,7 @@ import { registerNotificationIpc } from "./notification";
 import { registerSettingsIpc } from "./settings";
 import { registerSyncIpc } from "./sync";
 import { registerTrackingIpc } from "./tracking";
+import { registerWindowIpc } from "./window";
 
 export function registerIpcHandlers(): void {
   registerAuthIpc();
@@ -21,5 +22,6 @@ export function registerIpcHandlers(): void {
   registerSettingsIpc();
   registerSyncIpc();
   registerTrackingIpc();
+  registerWindowIpc();
   log.info("[ipc] All IPC handlers registered");
 }

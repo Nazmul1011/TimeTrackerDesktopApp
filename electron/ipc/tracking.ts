@@ -28,6 +28,7 @@ export function registerTrackingIpc(): void {
         screenshotIntervalMs,
         enableScreenshots,
         firstScreenshotDelayMs,
+        idleTimeoutMs,
       } = payload;
 
       if (!accessToken || !organizationId || !apiBaseUrl) {
@@ -47,6 +48,7 @@ export function registerTrackingIpc(): void {
           screenshotIntervalMs,
           enableScreenshots,
           firstScreenshotDelayMs,
+          idleTimeoutMs,
         },
       );
       log.info("[ipc:tracking] start", result);

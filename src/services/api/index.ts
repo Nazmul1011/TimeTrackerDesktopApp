@@ -11,5 +11,6 @@ export { monitoringApi } from "./monitoring.api";
 export { projectsApi } from "./projects.api";
 export { timesheetApi } from "./timesheet.api";
 export { notificationsApi } from "./notifications.api";
+export { usersApi } from "./users.api";
 export { reportsApi } from "./reports.api";
 export type * from "./types";

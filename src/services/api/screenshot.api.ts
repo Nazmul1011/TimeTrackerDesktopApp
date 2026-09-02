@@ -20,6 +20,7 @@ export type ApiScreenshot = {
   windowTitle?: string | null;
   isBlurred?: boolean;
   activityPercent?: number | null;
+  deleteRequested?: boolean;
 };
 
 function toIsoDate(date = new Date()): string {
@@ -74,7 +75,7 @@ export const screenshotApi = {
         screenshots?: ApiScreenshot[];
         items?: ApiScreenshot[];
         meta?: { total: number };
-      }> | ApiScreenshot[]
+      }>
     >("/screenshots", {
       params: {
         startDate: today,
@@ -84,17 +85,9 @@ export const screenshotApi = {
       },
     });
 
-    const payload = data.data as
-      | {
-          data?: ApiScreenshot[];
-          screenshots?: ApiScreenshot[];
-          items?: ApiScreenshot[];
-        }
-      | ApiScreenshot[]
-      | undefined;
-    const items = Array.isArray(payload)
-      ? payload
-      : payload?.data ?? payload?.screenshots ?? payload?.items ?? [];
+    const payload = data.data;
+    const items =
+      payload?.data ?? payload?.screenshots ?? payload?.items ?? [];
     return items.map((item) => ({
       ...item,
       imageUrl:
@@ -102,5 +95,47 @@ export const screenshotApi = {
         item.imageUrl ??
         null,
     }));
+  },
+
+  async requestDeletion(id: string) {
+    const { data } = await apiClient.post<
+      ApiResponse<{
+        id: string;
+        deleteRequested: boolean;
+        alreadyRequested?: boolean;
+        timeLabel?: string;
+      }>
+    >(`/screenshots/${id}/delete-request`);
+    return data.data;
+  },
+
+  async listPendingDeletionRequests(limit = 50) {
+    const { data } = await apiClient.get<
+      ApiResponse<
+        Array<{
+          id: string;
+          capturedAt: string;
+          appName?: string | null;
+          imageUrl?: string | null;
+          url?: string | null;
+          user?: { id: string; name: string; email: string };
+        }>
+      >
+    >("/screenshots/deletion-requests/pending", { params: { limit } });
+    const items = Array.isArray(data.data) ? data.data : [];
+    return items.map((item) => ({
+      ...item,
+      imageUrl:
+        resolveScreenshotUrl(item.imageUrl ?? item.url) ??
+        item.imageUrl ??
+        null,
+    }));
+  },
+
+  async reviewDeletion(id: string, action: "approve" | "reject", comment?: string) {
+    const { data } = await apiClient.post<
+      ApiResponse<{ id: string; action: string }>
+    >(`/screenshots/${id}/review-deletion`, { action, comment });
+    return data.data;
   },
 };

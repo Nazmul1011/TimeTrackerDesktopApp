@@ -5,16 +5,18 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { toast } from "sonner";
-import { normalizeAppName } from "@/lib/app-name";
 import { activityApi } from "@/services/api/activity.api";
 import { authApi } from "@/services/api/auth.api";
 import { monitoringApi, type MonitoringConfig } from "@/services/api/monitoring.api";
 import { timerApi } from "@/services/api/timer.api";
 import { ensureDeviceId, getApiBaseUrl } from "@/services/api/client";
 import { STORAGE_KEYS } from "@/constants/storage";
+import { normalizeAppName } from "@/lib/app-name";
+import { notifyToast } from "@/lib/notify";
+import { cancelWindowReveal } from "@/lib/window-reveal";
 import { getElectronAPI, isElectron } from "@/services/electron";
 import { useAuthStore } from "@/store/auth.store";
+import { useSettingsStore } from "@/store/settings.store";
 import { useTimerStore } from "@/store/timer.store";
 
 type Sample = {
@@ -54,6 +56,9 @@ export function useTrackingAgent() {
   const organizationId = useAuthStore((s) => s.organizationId);
   const tokens = useAuthStore((s) => s.tokens);
   const timerStatus = useTimerStore((s) => s.timer.status);
+  const idleTimeoutMinutes = useSettingsStore(
+    (s) => s.settings.idleTimeoutMinutes,
+  );
 
   const queueRef = useRef<Sample[]>([]);
   const lastSampleRef = useRef<{
@@ -197,34 +202,30 @@ export function useTrackingAgent() {
         !firstUploadToastRef.current
       ) {
         firstUploadToastRef.current = true;
-        toast.success("Screenshots are being captured");
+        notifyToast("success", "Screenshots are being captured");
       }
     });
 
     const unsubFailed = api.tracking.onFailed((payload) => {
       console.warn("[tracking] screenshot failed", payload);
       if (process.env.NEXT_PUBLIC_APP_ENV !== "production") {
-        toast.error(
+        notifyToast(
+          "error",
           payload?.message ||
             "Screenshot failed — check screen capture permissions",
         );
       }
     });
 
-    const unsubIdle = api.tracking.onIdleTimeout?.((payload) => {
+    const unsubIdle = api.tracking.onIdleTimeout?.(() => {
       if (cancelled) return;
       if (useTimerStore.getState().timer.status !== "running") return;
       void (async () => {
         try {
           const apiTimer = await timerApi.pause();
           useTimerStore.getState().hydrateFromApi(apiTimer);
-          const minutes = Math.max(
-            1,
-            Math.round((payload?.intervalMs ?? 5 * 60_000) / 60_000),
-          );
-          toast.warning(
-            `Timer paused — no mouse or keyboard activity for ${minutes} min`,
-          );
+          cancelWindowReveal();
+          // Native OS notification is shown from the main process (TrackingService).
         } catch (err) {
           console.warn("[tracking] idle auto-pause failed", err);
         }
@@ -239,6 +240,7 @@ export function useTrackingAgent() {
       if (!token) return;
 
       const intervalMs = resolveScreenshotIntervalMs(cfg);
+      const idleMinutes = useSettingsStore.getState().settings.idleTimeoutMinutes;
       void api.tracking.start({
         accessToken: token,
         refreshToken:
@@ -251,6 +253,8 @@ export function useTrackingAgent() {
         screenshotIntervalMs: intervalMs,
         enableScreenshots: screenshotsAllowed(cfg),
         firstScreenshotDelayMs: FIRST_SCREENSHOT_MS,
+        idleTimeoutMs:
+          idleMinutes > 0 ? Math.max(30_000, idleMinutes * 60_000) : 0,
       });
     };
 
@@ -308,6 +312,7 @@ export function useTrackingAgent() {
     isAuthenticated,
     organizationId,
     timerStatus,
+    idleTimeoutMinutes,
   ]);
 
   // Activity sampling + heartbeat (renderer)

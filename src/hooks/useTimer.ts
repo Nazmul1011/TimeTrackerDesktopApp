@@ -11,6 +11,10 @@ import { dispatchTimerStopped, TIMER_STOPPED_EVENT } from "@/lib/timer-events";
 import { timerApi } from "@/services/api/timer.api";
 import { timesheetApi } from "@/services/api/timesheet.api";
 import { sanitizeProjectId } from "@/lib/project";
+import {
+  cancelWindowReveal,
+  scheduleWindowRevealAfterResume,
+} from "@/lib/window-reveal";
 import { useAuthStore } from "@/store/auth.store";
 import { useTimerStore } from "@/store/timer.store";
 
@@ -158,6 +162,7 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
           description: timer.description || undefined,
         });
         hydrateFromApi(apiTimer);
+        cancelWindowReveal();
       } catch (err) {
         toast.error(getErrorMessage(err, "Failed to start timer"));
       } finally {
@@ -182,6 +187,7 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
     try {
       const apiTimer = await timerApi.pause();
       hydrateFromApi(apiTimer);
+      cancelWindowReveal();
     } catch (err) {
       toast.error(getErrorMessage(err, "Failed to pause timer"));
     } finally {
@@ -197,6 +203,7 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
     try {
       const apiTimer = await timerApi.resume();
       hydrateFromApi(apiTimer);
+      scheduleWindowRevealAfterResume();
     } catch (err) {
       toast.error(getErrorMessage(err, "Failed to resume timer"));
     } finally {
@@ -226,6 +233,7 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
         result?.totalDurationSeconds || fromEntries || sessionSeconds;
       const previousLogged = useTimerStore.getState().todayLoggedMs;
       setIdle();
+      cancelWindowReveal();
       if (savedSeconds > 0) {
         setTodayLoggedSeconds(previousLogged / 1000 + savedSeconds);
       }

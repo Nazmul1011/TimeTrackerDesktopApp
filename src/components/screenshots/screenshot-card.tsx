@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { formatActivityPercent } from "@/lib/activity-percent";
 
 export type ScreenshotItem = {
   id: string;
@@ -25,12 +26,17 @@ export type ScreenshotItem = {
 
 interface ScreenshotCardProps {
   item: ScreenshotItem;
-  onRequestDelete?: (id: string) => void;
+  onRequestDelete?: (id: string) => void | Promise<void>;
 }
 
 export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
   const [showDelete, setShowDelete] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
+
+  const activityLabel =
+    typeof item.activityPercent === "number"
+      ? formatActivityPercent(item.activityPercent)
+      : null;
 
   return (
     <div className="relative overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-white p-1">
@@ -46,8 +52,8 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
           }
         }}
         aria-label={
-          typeof item.activityPercent === "number"
-            ? `Screenshot at ${item.timeLabel}, ${item.activityPercent}% activity`
+          activityLabel
+            ? `Screenshot at ${item.timeLabel}, ${activityLabel}% activity`
             : `Screenshot at ${item.timeLabel}`
         }
       >
@@ -66,6 +72,12 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
           </div>
         )}
 
+        {item.deleteRequested ? (
+          <span className="absolute left-1.5 top-1.5 rounded bg-amber-500/90 px-1.5 py-0.5 text-[9px] font-medium text-white">
+            Pending deletion
+          </span>
+        ) : null}
+
         {typeof item.activityPercent === "number" && !showDelete ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col gap-1 bg-gradient-to-t from-black/75 to-transparent px-2 pb-1.5 pt-6 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100">
             <div className="h-1 overflow-hidden rounded-full bg-white/30">
@@ -81,7 +93,7 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
               />
             </div>
             <span className="text-[10px] font-medium leading-none text-white">
-              {item.activityPercent}% activity
+              {activityLabel}% activity
             </span>
           </div>
         ) : null}
@@ -99,13 +111,21 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
               variant="outline"
               size="sm"
               className="h-8 border-red-400 bg-white text-xs text-red-500 hover:bg-red-50 hover:text-red-600"
+              disabled={item.deleteRequested}
               onClick={() => {
-                onRequestDelete?.(item.id);
-                setShowDelete(false);
-                toast.success("Deletion request submitted for admin review");
+                if (item.deleteRequested) return;
+                void (async () => {
+                  try {
+                    await onRequestDelete?.(item.id);
+                    setShowDelete(false);
+                    toast.success("Deletion request submitted for admin review");
+                  } catch {
+                    toast.error("Could not submit deletion request");
+                  }
+                })();
               }}
             >
-              Request to delete
+              {item.deleteRequested ? "Request pending" : "Request to delete"}
             </Button>
           </div>
         )}
@@ -126,7 +146,12 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => setShowDelete(true)}>Request to delete</DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={item.deleteRequested}
+              onClick={() => setShowDelete(true)}
+            >
+              {item.deleteRequested ? "Deletion pending" : "Request to delete"}
+            </DropdownMenuItem>
             {item.imageUrl ? (
               <DropdownMenuItem
                 onClick={() => window.open(item.imageUrl!, "_blank", "noopener,noreferrer")}

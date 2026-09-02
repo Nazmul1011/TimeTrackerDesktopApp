@@ -10,7 +10,7 @@ import log from "electron-log/main";
 import { LinuxXInputListener } from "./linux-xinput";
 
 const CURSOR_POLL_MS = 250;
-const MOVE_THRESHOLD_PX = 4;
+const MOVE_THRESHOLD_PX = 2;
 
 export class IdleService {
   private static instance: IdleService | null = null;
@@ -65,16 +65,27 @@ export class IdleService {
 
   /** Seconds since the last real mouse move, click, or key press. */
   getIdleSeconds(): number {
+    const ms = this.getMsSinceLastInput();
+    if (!Number.isFinite(ms)) return 10_000;
+    return Math.floor(ms / 1000);
+  }
+
+  /** Milliseconds since last detected input (sub-second precision). */
+  getMsSinceLastInput(): number {
     if (this.watching) {
-      if (this.lastInputAt <= 0) return 10_000;
-      return Math.max(0, Math.floor((Date.now() - this.lastInputAt) / 1000));
+      if (this.lastInputAt <= 0) return Number.POSITIVE_INFINITY;
+      return Math.max(0, Date.now() - this.lastInputAt);
     }
     try {
-      return powerMonitor.getSystemIdleTime();
+      return powerMonitor.getSystemIdleTime() * 1000;
     } catch (error) {
       log.warn("[IdleService] getSystemIdleTime failed", error);
       return 0;
     }
+  }
+
+  hadRecentInput(withinMs: number): boolean {
+    return this.getMsSinceLastInput() < withinMs;
   }
 
   getIdleState(thresholdSeconds = 180): { idle: boolean; idleMs: number } {
@@ -110,9 +121,8 @@ export class IdleService {
     }
   }
 
-  /** OS idle dropping means input happened — useful on Windows/macOS. */
+  /** OS idle dropping means input happened — keyboard on Wayland, Windows, macOS. */
   private pollOsIdleReset() {
-    if (process.platform === "linux") return;
     try {
       const osIdle = powerMonitor.getSystemIdleTime();
       if (this.lastOsIdle !== null && osIdle < this.lastOsIdle) {

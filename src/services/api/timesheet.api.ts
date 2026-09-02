@@ -14,6 +14,8 @@ export type ApiTimeEntry = {
   projectId?: string | null;
   project?: { id: string; name: string; color?: string | null } | null;
   source?: string;
+  isManual?: boolean;
+  status?: string;
 };
 
 export function toIsoDate(date = new Date()): string {
@@ -38,5 +40,25 @@ export const timesheetApi = {
   async getTodayLoggedSeconds() {
     const entries = await this.listToday();
     return entries.reduce((sum, entry) => sum + (entry.duration ?? 0), 0);
+  },
+
+  async update(
+    id: string,
+    payload: {
+      description?: string;
+      projectId?: string | null;
+    },
+  ) {
+    const { data } = await apiClient.patch<
+      ApiResponse<{ entry: ApiTimeEntry }>
+    >(`/time-entries/${id}`, payload);
+    return data.data?.entry;
+  },
+
+  async delete(id: string) {
+    const { data } = await apiClient.delete<
+      ApiResponse<{ id: string; deleted: boolean }>
+    >(`/time-entries/${id}`);
+    return data.data;
   },
 };

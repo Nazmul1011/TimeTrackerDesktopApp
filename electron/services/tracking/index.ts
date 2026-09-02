@@ -7,6 +7,8 @@ import log from "electron-log/main";
 import { ScreenshotService } from "../screenshots";
 import { ActivityService } from "../activity";
 import { InputActivityMonitor } from "../input-activity";
+import { NotificationService } from "../notifications";
+import { WindowRevealService } from "../window-reveal";
 
 export type TrackingAuth = {
   accessToken: string;
@@ -21,6 +23,8 @@ export type TrackingOptions = {
   screenshotIntervalMs: number;
   enableScreenshots: boolean;
   firstScreenshotDelayMs?: number;
+  /** 0 = idle auto-pause disabled */
+  idleTimeoutMs?: number;
 };
 
 export class TrackingService {
@@ -32,6 +36,7 @@ export class TrackingService {
     screenshotIntervalMs: 5 * 60_000,
     enableScreenshots: true,
     firstScreenshotDelayMs: 3_000,
+    idleTimeoutMs: 3 * 60_000,
   };
   private screenshotTimer: NodeJS.Timeout | null = null;
   private firstShotTimer: NodeJS.Timeout | null = null;
@@ -39,6 +44,7 @@ export class TrackingService {
   private capturing = false;
   private authWaiters: Array<(ok: boolean) => void> = [];
   private idlePauseInFlight = false;
+  private scheduleRevealOnNextStart = false;
   private lastCaptureAt = 0;
 
   static getInstance(): TrackingService {
@@ -92,16 +98,23 @@ export class TrackingService {
       ),
       enableScreenshots: options?.enableScreenshots !== false,
       firstScreenshotDelayMs: options?.firstScreenshotDelayMs ?? 3_000,
+      idleTimeoutMs:
+        typeof options?.idleTimeoutMs === "number"
+          ? Math.max(0, options.idleTimeoutMs)
+          : 3 * 60_000,
     };
     this.running = true;
     this.idlePauseInFlight = false;
 
     ActivityService.getInstance().start();
+    const idleMs = this.options.idleTimeoutMs ?? 0;
     InputActivityMonitor.getInstance().start(
-      this.options.screenshotIntervalMs,
-      () => {
-        void this.handleIdleTimeout();
-      },
+      idleMs > 0 ? idleMs : 0,
+      idleMs > 0
+        ? () => {
+            void this.handleIdleTimeout();
+          }
+        : null,
     );
 
     if (this.options.enableScreenshots) {
@@ -117,6 +130,19 @@ export class TrackingService {
     log.info(
       `[TrackingService] started — screenshots every ${Math.round(this.options.screenshotIntervalMs / 1000)}s`,
     );
+
+    if (this.scheduleRevealOnNextStart) {
+      this.scheduleRevealOnNextStart = false;
+      const revealMs = Math.max(
+        60_000,
+        this.options.idleTimeoutMs ?? 5 * 60_000,
+      );
+      WindowRevealService.getInstance().scheduleAfterResume(revealMs);
+      log.info(
+        `[TrackingService] window reveal scheduled after idle resume (${Math.round(revealMs / 1000)}s)`,
+      );
+    }
+
     return { ok: true, intervalMs: this.options.screenshotIntervalMs };
   }
 
@@ -124,6 +150,7 @@ export class TrackingService {
     if (this.stopTimer) {
       clearTimeout(this.stopTimer);
     }
+    WindowRevealService.getInstance().cancel();
     // Survive React Strict Mode remounts and brief timer-sync blips.
     this.stopTimer = setTimeout(() => {
       this.stopTimer = null;
@@ -310,7 +337,7 @@ export class TrackingService {
       pushField("windowTitle", meta.windowTitle);
     }
     pushField("deviceId", this.auth?.deviceId ?? "desktop");
-    pushField("activityPercent", String(Math.round(meta.activityPercent)));
+    pushField("activityPercent", String(meta.activityPercent));
     chunks.push(
       Buffer.from(
         `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="screenshot.png"\r\nContent-Type: ${meta.mimeType}\r\n\r\n`,
@@ -398,8 +425,20 @@ export class TrackingService {
       }
     }
 
+    const idleMs =
+      this.options.idleTimeoutMs ?? this.options.screenshotIntervalMs;
+    const idleMinutes = Math.max(1, Math.round(idleMs / 60_000));
+
+    const notifyResult =
+      NotificationService.getInstance().showTimerIdlePaused(idleMinutes);
+    if (!notifyResult.ok) {
+      log.warn("[TrackingService] idle notification failed", notifyResult.message);
+    }
+
+    this.scheduleRevealOnNextStart = true;
+
     this.emitToRenderer("tracking:idle-timeout", {
-      intervalMs: this.options.screenshotIntervalMs,
+      intervalMs: idleMs,
       activityPercent: InputActivityMonitor.getInstance().peekPercent(),
     });
 

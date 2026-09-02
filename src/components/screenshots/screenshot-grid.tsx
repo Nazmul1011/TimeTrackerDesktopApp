@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { dayjs } from "@/lib/dayjs";
 import { SCREENSHOT_CAPTURED_EVENT } from "@/hooks/useTrackingAgent";
+import { emitNotificationsChanged } from "@/hooks/useNotifications";
 import { screenshotApi, resolveScreenshotUrl } from "@/services/api/screenshot.api";
 import { useAuthStore } from "@/store/auth.store";
 import {
@@ -20,6 +21,7 @@ function mapApiToItem(item: {
   capturedAt: string;
   appName?: string | null;
   activityPercent?: number | null;
+  deleteRequested?: boolean;
 }): ScreenshotItem {
   return {
     id: item.id,
@@ -29,6 +31,7 @@ function mapApiToItem(item: {
     timeLabel: dayjs(item.capturedAt).format("hh:mm A"),
     activityPercent:
       typeof item.activityPercent === "number" ? item.activityPercent : null,
+    deleteRequested: Boolean(item.deleteRequested),
   };
 }
 
@@ -110,10 +113,21 @@ export function ScreenshotGrid() {
     return () => window.clearInterval(id);
   }, [reload]);
 
-  const handleRequestDelete = (id: string) => {
+  const handleRequestDelete = async (id: string) => {
     setItems((prev) =>
       prev.map((s) => (s.id === id ? { ...s, deleteRequested: true } : s)),
     );
+    try {
+      await screenshotApi.requestDeletion(id);
+      emitNotificationsChanged();
+    } catch {
+      setItems((prev) =>
+        prev.map((s) =>
+          s.id === id ? { ...s, deleteRequested: false } : s,
+        ),
+      );
+      throw new Error("delete-request-failed");
+    }
   };
 
   if (loading) {

@@ -48,6 +48,8 @@ export interface ElectronAPI {
       screenshotIntervalMs?: number;
       enableScreenshots?: boolean;
       firstScreenshotDelayMs?: number;
+      /** 0 disables idle auto-pause */
+      idleTimeoutMs?: number;
     }) => Promise<{ ok: boolean; intervalMs?: number; message?: string }>;
     stop: () => Promise<{ ok: boolean }>;
     updateAuth: (payload: {
@@ -84,16 +86,51 @@ export interface ElectronAPI {
     ) => () => void;
   };
   notification: {
-    show: (payload: unknown) => Promise<unknown>;
+    show: (payload: {
+      title?: string;
+      body?: string;
+      message?: string;
+    }) => Promise<{ ok: boolean; message?: string }>;
     list: () => Promise<unknown>;
   };
   settings: {
-    get: () => Promise<unknown>;
-    set: (payload: unknown) => Promise<unknown>;
+    get: () => Promise<{
+      theme: "light" | "dark" | "system";
+      screenshotIntervalMinutes: number;
+      idleTimeoutMinutes: number;
+      autoStartOnLogin: boolean;
+      notificationsEnabled: boolean;
+    }>;
+    set: (
+      payload: Partial<{
+        theme: "light" | "dark" | "system";
+        screenshotIntervalMinutes: number;
+        idleTimeoutMinutes: number;
+        autoStartOnLogin: boolean;
+        notificationsEnabled: boolean;
+      }>,
+    ) => Promise<{
+      ok: boolean;
+      settings?: {
+        theme: "light" | "dark" | "system";
+        screenshotIntervalMinutes: number;
+        idleTimeoutMinutes: number;
+        autoStartOnLogin: boolean;
+        notificationsEnabled: boolean;
+      };
+      message?: string;
+    }>;
   };
   sync: {
     run: () => Promise<unknown>;
     getStatus: () => Promise<unknown>;
+  };
+  window: {
+    scheduleRevealAfterResume: (payload?: {
+      delayMs?: number;
+    }) => Promise<{ ok: boolean }>;
+    cancelReveal: () => Promise<{ ok: boolean }>;
+    revealNow: () => Promise<{ ok: boolean }>;
   };
   platform: NodeJS.Platform;
   versions: {

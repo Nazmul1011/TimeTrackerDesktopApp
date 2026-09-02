@@ -79,6 +79,13 @@ const electronAPI = {
     get: () => ipcRenderer.invoke("settings:get"),
     set: (payload: unknown) => ipcRenderer.invoke("settings:set", payload),
   },
+  // Window
+  window: {
+    scheduleRevealAfterResume: (payload?: { delayMs?: number }) =>
+      ipcRenderer.invoke("window:scheduleRevealAfterResume", payload ?? {}),
+    cancelReveal: () => ipcRenderer.invoke("window:cancelReveal"),
+    revealNow: () => ipcRenderer.invoke("window:revealNow"),
+  },
   // Sync
   sync: {
     run: () => ipcRenderer.invoke("sync:run"),

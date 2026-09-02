@@ -1,8 +1,8 @@
 # Gr8r Time Tracker — Desktop Client
 
-Enterprise-ready Electron + Next.js desktop application for time tracking and HRM.
+Electron + Next.js desktop app for time tracking, activity monitoring, and employee self-service.
 
-> This repository contains **only** the desktop client. Backend APIs and the web dashboard live elsewhere.
+Part of the Gr8r monorepo alongside `TimeTrackerBackend` (API, ~3001) and `TimeTrackerFrontendGr8r` (web dashboard, ~3002).
 
 ## Tech Stack
 
@@ -11,81 +11,79 @@ Enterprise-ready Electron + Next.js desktop application for time tracking and HR
 | Desktop shell | Electron |
 | UI | Next.js (App Router), React, TypeScript |
 | Styling | TailwindCSS, shadcn/ui |
-| State | Zustand, TanStack Query |
-| Forms | React Hook Form, Zod |
-| Local DB | better-sqlite3 |
+| State | Zustand |
+| API | Axios → NestJS backend |
+| Local DB | better-sqlite3 (optional, Electron main process) |
 | Packaging | electron-builder, electron-updater |
 
 ## Getting Started
 
+### Prerequisites
+
+- Node.js 20+
+- Backend running at `http://localhost:3001` (see `TimeTrackerBackend`)
+
+### Run the desktop app
+
 ```bash
 cd TimeTrackerDesktopApp
-cp .env.example .env
+cp .env.example .env   # set NEXT_PUBLIC_API_URL=http://localhost:3001
 npm install
 npm run dev
 ```
 
-This starts Next.js in the background and opens the **Electron desktop window** (~446×640). Do not open `http://localhost:3000` in a browser for normal use — activity tracking and screenshots only work inside Electron.
+This starts Next.js and opens the **Electron window** (~446×640). Activity tracking and screenshots only work inside Electron — not in a plain browser tab.
+
+**Seed login:** `admin@gr8r.studio` / `Password123!`
 
 ### Scripts
 
 | Script | Description |
 | --- | --- |
-| `npm run dev` / `npm start` | **Desktop app** — Next.js + Electron window |
-| `npm run dev:web` | Next.js renderer only (browser debugging) |
+| `npm run dev` / `npm start` | Desktop app — Next.js + Electron |
+| `npm run dev:web` | Renderer only (browser debugging) |
 | `npm run electron:dev` | Same as `dev` |
-| `npm run electron` | Launch Electron against compiled main process |
 | `npm run build` | Build Next.js renderer |
 | `npm run electron:build` | Package desktop installers |
 | `npm run lint` | ESLint |
-| `npm run format` | Prettier |
-| `npm run typecheck` | TypeScript checks (renderer + Electron) |
+| `npm run typecheck` | TypeScript (renderer + Electron) |
 
 ## Architecture
 
 ```
-desktop/
-├── electron/     # Main process, preload, IPC, native services, SQLite
-├── src/          # Next.js App Router renderer (UI)
-├── public/       # Static assets served by Next.js
-└── resources/    # Icons, tray assets, fonts for packaging
+TimeTrackerDesktopApp/
+├── electron/     # Main process, preload, IPC, native services
+├── src/          # Next.js App Router renderer
+├── public/       # Static assets
+└── resources/    # Icons and packaging assets
 ```
 
-### Electron (`electron/`)
+### Features (implemented)
 
-- **main/** — Window lifecycle, tray, menu, updater, security hardening
-- **preload/** — Context-isolated bridge exposing a typed `window.electronAPI`
-- **ipc/** — Empty IPC channel handlers (auth, timer, screenshots, etc.)
-- **services/** — Native service stubs (activity, idle, sync, storage…)
-- **database/** — better-sqlite3 initialization (no schema yet)
+- **Timer** — start/stop/pause/resume, sync with backend on focus and org switch
+- **Activity tracking** — app/window usage, idle detection (Electron only)
+- **Screenshots** — periodic capture, delete-request workflow with admin review
+- **Timesheet** — today's entries with edit (description/project) and delete
+- **Summary** — live top apps and daily stats from backend
+- **Profile** — edit name, phone, timezone via `PATCH /users/me`
+- **Settings** — notifications, launch on login, screenshot interval (theme: light only)
+- **Notifications** — live inbox, push/idle toggles, deep links to home tabs
 
-### Renderer (`src/`)
+### Routes
 
-- **app/** — Routes: `/` → `/home`, login, profile, settings, notifications
-- **components/** — Layout, timer, summary, timesheet, screenshots, UI primitives
-- **features/** — Feature-based modules (empty shells ready for business logic)
-- **store/** — Zustand stores
-- **providers/** — Query, theme, toast, tooltip, dialog
-- **services/** — Axios API client + Electron bridge helpers
+| Path | Purpose |
+| --- | --- |
+| `/login` | Authentication |
+| `/home` | Timer + Summary / Timesheet / Screenshots tabs |
+| `/profile` | View and edit profile |
+| `/settings` | Preferences |
+| `/notifications` | Inbox + admin screenshot deletion review |
 
-## Status
+## Environment
 
-This is an **architecture-only** initialization.
-
-- No timer / activity / screenshot business logic
-- No backend integration beyond Axios stubs
-- Home page layout + empty feature modules only
-
-### Local SQLite (`better-sqlite3`)
-
-`better-sqlite3` is listed under `optionalDependencies` because it needs a native build that may fail on newer Node versions during `npm install`. The Electron main process loads it dynamically and continues if unavailable.
-
-To enable SQLite later:
-
-```bash
-npm install better-sqlite3
-npx electron-rebuild -f -w better-sqlite3
-```
+| Variable | Default | Description |
+| --- | --- | --- |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:3001` | Backend API base URL |
 
 ## License
 

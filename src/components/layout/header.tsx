@@ -3,6 +3,7 @@
  */
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { WorkspaceSelector } from "@/components/layout/workspace-selector";
@@ -15,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ROUTES } from "@/constants/routes";
+import { useNotificationNavigation } from "@/hooks/useNotificationNavigation";
 import { useNotifications } from "@/hooks/useNotifications";
 import { cn } from "@/lib/utils";
 import { authApi } from "@/services/api/auth.api";
@@ -37,6 +39,11 @@ export function Header() {
     loadNotifications,
     markAsRead,
   } = useNotifications({ poll: true });
+  const { navigateFromNotification } = useNotificationNavigation();
+
+  useEffect(() => {
+    void loadNotifications({ silent: true });
+  }, [loadNotifications]);
 
   const handleSignOut = async () => {
     try {
@@ -122,12 +129,24 @@ export function Header() {
                 </button>
               </div>
             ) : (
-              <NotificationDropdownList
-                notifications={notifications}
-                onSelect={(n) => {
-                  if (!n.read) void markAsRead(n.id);
-                }}
-              />
+              <>
+                <NotificationDropdownList
+                  notifications={notifications}
+                  onSelect={(n) => {
+                    if (!n.read) void markAsRead(n.id);
+                    navigateFromNotification(n.actionUrl);
+                  }}
+                />
+                <div className="border-t border-[#ededed] px-3 py-2">
+                  <button
+                    type="button"
+                    className="w-full text-center text-xs font-medium text-[#2b7fff]"
+                    onClick={() => router.push(ROUTES.NOTIFICATIONS)}
+                  >
+                    View all notifications
+                  </button>
+                </div>
+              </>
             )}
           </DropdownMenuContent>
         </DropdownMenu>

@@ -1,18 +1,21 @@
 /**
  * Samples mouse + keyboard activity while the timer is running.
- * A second counts as active only if real input occurred in that second.
+ * Uses 250ms samples; a sample is active when input occurred in the last second.
  */
 import log from "electron-log/main";
 import { IdleService } from "../idle";
 
-const TICK_MS = 1_000;
+const TICK_MS = 250;
+const TICKS_PER_IDLE_SECOND = 1000 / TICK_MS;
+const ACTIVE_WINDOW_MS = 1_000;
 
 export class InputActivityMonitor {
   private static instance: InputActivityMonitor | null = null;
 
   private tickTimer: NodeJS.Timeout | null = null;
-  private activeTicks = 0;
-  private idleTicks = 0;
+  private activeSamples = 0;
+  private idleSamples = 0;
+  private consecutiveIdleSeconds = 0;
   private consecutiveIdleTicks = 0;
   private intervalSeconds = 300;
   private idleEmitted = false;
@@ -25,18 +28,24 @@ export class InputActivityMonitor {
     return InputActivityMonitor.instance;
   }
 
-  start(intervalMs: number, onIdleForInterval: () => void) {
+  start(intervalMs: number, onIdleForInterval: (() => void) | null) {
     this.stop();
     this.resetWindow();
+    this.consecutiveIdleSeconds = 0;
     this.consecutiveIdleTicks = 0;
     this.idleEmitted = false;
-    this.intervalSeconds = Math.max(60, Math.round(intervalMs / 1000));
     this.onIdleForInterval = onIdleForInterval;
+    this.intervalSeconds =
+      intervalMs > 0
+        ? Math.max(30, Math.round(intervalMs / 1000))
+        : Number.MAX_SAFE_INTEGER;
     IdleService.getInstance().startWatching();
     this.tickTimer = setInterval(() => this.tick(), TICK_MS);
     this.tick();
     log.info(
-      `[InputActivityMonitor] started — idle pause after ${this.intervalSeconds}s without input`,
+      intervalMs > 0
+        ? `[InputActivityMonitor] started — ${TICK_MS}ms samples, idle pause after ${this.intervalSeconds}s without input`
+        : `[InputActivityMonitor] started — ${TICK_MS}ms samples, idle auto-pause disabled`,
     );
   }
 
@@ -51,51 +60,53 @@ export class InputActivityMonitor {
 
   /** Activity % since the last screenshot, then start a new window. */
   consumePercent(): number {
-    const total = this.activeTicks + this.idleTicks;
-    const percent =
-      total <= 0
-        ? 0
-        : Math.round((this.activeTicks / total) * 100);
+    const percent = this.computePercent();
     log.info(
-      `[InputActivityMonitor] window activity ${percent}% (${this.activeTicks}s active / ${total}s sampled)`,
+      `[InputActivityMonitor] window activity ${percent}% (${this.activeSamples} active / ${this.activeSamples + this.idleSamples} samples)`,
     );
     this.resetWindow();
-    return Math.max(0, Math.min(100, percent));
+    return percent;
   }
 
   peekPercent(): number {
-    const total = this.activeTicks + this.idleTicks;
+    return this.computePercent();
+  }
+
+  private computePercent(): number {
+    const total = this.activeSamples + this.idleSamples;
     if (total <= 0) return 0;
-    return Math.max(
-      0,
-      Math.min(100, Math.round((this.activeTicks / total) * 100)),
-    );
+    const raw = (this.activeSamples / total) * 100;
+    return Math.max(0, Math.min(100, Math.round(raw * 10) / 10));
   }
 
   private resetWindow() {
-    this.activeTicks = 0;
-    this.idleTicks = 0;
+    this.activeSamples = 0;
+    this.idleSamples = 0;
   }
 
   private tick() {
-    const idleSeconds = IdleService.getInstance().getIdleSeconds();
-    const active = idleSeconds < 1;
+    const active = IdleService.getInstance().hadRecentInput(ACTIVE_WINDOW_MS);
     if (active) {
-      this.activeTicks += 1;
+      this.activeSamples += 1;
       this.consecutiveIdleTicks = 0;
+      this.consecutiveIdleSeconds = 0;
       return;
     }
 
-    this.idleTicks += 1;
+    this.idleSamples += 1;
     this.consecutiveIdleTicks += 1;
+    if (this.consecutiveIdleTicks >= TICKS_PER_IDLE_SECOND) {
+      this.consecutiveIdleTicks = 0;
+      this.consecutiveIdleSeconds += 1;
+    }
 
     if (
       !this.idleEmitted &&
-      this.consecutiveIdleTicks >= this.intervalSeconds
+      this.consecutiveIdleSeconds >= this.intervalSeconds
     ) {
       this.idleEmitted = true;
       log.info(
-        `[InputActivityMonitor] idle for ${this.consecutiveIdleTicks}s — requesting timer pause`,
+        `[InputActivityMonitor] idle for ${this.consecutiveIdleSeconds}s — requesting timer pause`,
       );
       this.onIdleForInterval?.();
     }

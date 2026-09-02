@@ -4,7 +4,7 @@
  */
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { TimerCard } from "@/components/timer/timer-card";
@@ -13,6 +13,9 @@ import { TimesheetTab } from "@/components/timesheet/timesheet-tab";
 import { ScreenshotGrid } from "@/components/screenshots/screenshot-grid";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ROUTES } from "@/constants/routes";
+import { useTimerSync } from "@/hooks/useTimerSync";
+import { useTrackingAgent } from "@/hooks/useTrackingAgent";
+import { HOME_TAB_EVENT } from "@/lib/notification-nav";
 import { authApi } from "@/services/api/auth.api";
 import { orgApi } from "@/services/api/org.api";
 import { timerApi } from "@/services/api/timer.api";
@@ -20,7 +23,8 @@ import { connectRealtime } from "@/services/realtime/socket";
 import { useAuthStore } from "@/store/auth.store";
 import { useTimerStore } from "@/store/timer.store";
 import { mapApiUserToUser } from "@/types";
-import { useTrackingAgent } from "@/hooks/useTrackingAgent";
+
+type HomeTab = "summary" | "timesheet" | "screenshots";
 
 export default function HomePage() {
   const router = useRouter();
@@ -29,8 +33,19 @@ export default function HomePage() {
   const organizationId = useAuthStore((s) => s.organizationId);
   const tokens = useAuthStore((s) => s.tokens);
   const hydrateFromApi = useTimerStore((s) => s.hydrateFromApi);
+  const [activeTab, setActiveTab] = useState<HomeTab>("summary");
 
   useTrackingAgent();
+  useTimerSync({ onFocus: true });
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const tab = (event as CustomEvent<{ tab?: HomeTab }>).detail?.tab;
+      if (tab) setActiveTab(tab);
+    };
+    window.addEventListener(HOME_TAB_EVENT, handler);
+    return () => window.removeEventListener(HOME_TAB_EVENT, handler);
+  }, []);
 
   useEffect(() => {
     if (!tokens.accessToken) {
@@ -94,7 +109,7 @@ export default function HomePage() {
       <TimerCard />
 
       <section className="surface-card flex min-h-[250px] flex-col gap-3 p-3">
-        <Tabs defaultValue="summary" className="w-full">
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as HomeTab)} className="w-full">
           <TabsList className="grid h-10 w-full grid-cols-3 rounded-lg bg-[#f5f5f5] p-1">
             <TabsTrigger
               value="summary"

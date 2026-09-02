@@ -40,10 +40,15 @@ export function WorkspaceSelector() {
     }
 
     try {
-      const currentTimer = await timerApi.current();
-      hydrateFromApi(currentTimer);
+      const synced = await timerApi.sync();
+      hydrateFromApi(synced);
     } catch {
-      hydrateFromApi(null);
+      try {
+        const currentTimer = await timerApi.current();
+        hydrateFromApi(currentTimer);
+      } catch {
+        hydrateFromApi(null);
+      }
     }
   };
 
