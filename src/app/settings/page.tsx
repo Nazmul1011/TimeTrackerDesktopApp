@@ -4,7 +4,6 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Header } from "@/components/layout/header";
 import { SettingsForm } from "@/components/settings/settings-form";
 import { Button } from "@/components/ui/button";
 import { ROUTES } from "@/constants/routes";

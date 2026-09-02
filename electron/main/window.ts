@@ -2,9 +2,10 @@
  * BrowserWindow factory.
  * Creates the main application window with context isolation enabled.
  */
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, nativeImage, shell } from "electron";
 import path from "path";
 import log from "electron-log/main";
+import { findExistingPath, resolveAppIconPaths } from "../utils";
 
 async function waitForRenderer(url: string, attempts = 40): Promise<void> {
   for (let i = 0; i < attempts; i++) {
@@ -21,6 +22,9 @@ async function waitForRenderer(url: string, attempts = 40): Promise<void> {
 }
 
 export function createMainWindow(): BrowserWindow {
+  const iconPath = findExistingPath(resolveAppIconPaths());
+  const icon = iconPath ? nativeImage.createFromPath(iconPath) : undefined;
+
   const win = new BrowserWindow({
     width: 446,
     height: 640,
@@ -31,6 +35,7 @@ export function createMainWindow(): BrowserWindow {
     title: "Gr8r Time Tracker",
     backgroundColor: "#f9fafb",
     autoHideMenuBar: true,
+    ...(icon && !icon.isEmpty() ? { icon } : {}),
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,

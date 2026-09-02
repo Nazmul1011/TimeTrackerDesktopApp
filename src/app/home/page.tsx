@@ -13,8 +13,6 @@ import { TimesheetTab } from "@/components/timesheet/timesheet-tab";
 import { ScreenshotGrid } from "@/components/screenshots/screenshot-grid";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ROUTES } from "@/constants/routes";
-import { useTimerSync } from "@/hooks/useTimerSync";
-import { useTrackingAgent } from "@/hooks/useTrackingAgent";
 import { HOME_TAB_EVENT } from "@/lib/notification-nav";
 import { authApi } from "@/services/api/auth.api";
 import { orgApi } from "@/services/api/org.api";
@@ -34,9 +32,6 @@ export default function HomePage() {
   const tokens = useAuthStore((s) => s.tokens);
   const hydrateFromApi = useTimerStore((s) => s.hydrateFromApi);
   const [activeTab, setActiveTab] = useState<HomeTab>("summary");
-
-  useTrackingAgent();
-  useTimerSync({ onFocus: true });
 
   useEffect(() => {
     const handler = (event: Event) => {

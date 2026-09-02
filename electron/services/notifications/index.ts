@@ -6,17 +6,22 @@ import { execFile } from "child_process";
 import fs from "fs";
 import path from "path";
 import { promisify } from "util";
-import { app, BrowserWindow, nativeImage, Notification } from "electron";
+import { app, nativeImage, Notification } from "electron";
 import log from "electron-log/main";
 import { SettingsService } from "../settings";
 import { WindowRevealService } from "../window-reveal";
+import {
+  findExistingPath,
+  getResourcesRoot,
+  resolveAppIconPaths,
+} from "../../utils";
 
 const execFileAsync = promisify(execFile);
 
 export class NotificationService {
   private static instance: NotificationService | null = null;
 
-  /** Keep references until closed — otherwise GC prevents Linux notifications. */
+  /** Keep references until closed — otherwise GC can drop the toast. */
   private active: Notification[] = [];
 
   static getInstance(): NotificationService {
@@ -43,7 +48,9 @@ export class NotificationService {
     options?: { urgency?: "normal" | "critical" | "low" },
   ): { ok: boolean; message?: string } {
     if (!SettingsService.getInstance().notificationsEnabled()) {
-      log.info("[NotificationService] skipped — notifications disabled in settings");
+      log.info(
+        "[NotificationService] skipped — notifications disabled in settings",
+      );
       return { ok: false, message: "Notifications disabled in settings" };
     }
 
@@ -61,6 +68,11 @@ export class NotificationService {
 
     if (process.platform === "linux") {
       void this.showLinuxNotifySend(safeTitle, safeBody, options?.urgency);
+      return { ok: true };
+    }
+
+    if (process.platform === "win32") {
+      void this.showWindowsToastFallback(safeTitle, safeBody);
       return { ok: true };
     }
 
@@ -99,7 +111,11 @@ export class NotificationService {
       notification.on("failed", (_event, error) => {
         log.warn("[NotificationService] notification failed event", error);
         cleanup();
-        void this.showLinuxNotifySend(title, body, options?.urgency);
+        if (process.platform === "linux") {
+          void this.showLinuxNotifySend(title, body, options?.urgency);
+        } else if (process.platform === "win32") {
+          void this.showWindowsToastFallback(title, body);
+        }
       });
 
       notification.show();
@@ -134,31 +150,89 @@ export class NotificationService {
     }
   }
 
+  /**
+   * Windows toast via PowerShell WinRT APIs (fallback when Electron toast fails).
+   * Requires AppUserModelId set on the process (see main/index.ts).
+   */
+  private async showWindowsToastFallback(
+    title: string,
+    body: string,
+  ): Promise<boolean> {
+    try {
+      const escapeXml = (value: string) =>
+        value
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+
+      const toastXml = `
+<toast>
+  <visual>
+    <binding template="ToastGeneric">
+      <text>${escapeXml(title)}</text>
+      <text>${escapeXml(body)}</text>
+    </binding>
+  </visual>
+</toast>`.trim();
+
+      const ps = `
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
+$xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+$xml.LoadXml(@'
+${toastXml}
+'@)
+$toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
+$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('com.gr8r.timetracker')
+$notifier.Show($toast)
+`;
+
+      await execFileAsync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          ps,
+        ],
+        { timeout: 5000, windowsHide: true },
+      );
+      log.info("[NotificationService] shown via Windows toast fallback", {
+        title,
+        body,
+      });
+      return true;
+    } catch (error) {
+      log.warn("[NotificationService] Windows toast fallback failed", error);
+      return false;
+    }
+  }
+
   private resolveIconPath(): string | undefined {
-    const resourcesRoot = app.isPackaged
-      ? process.resourcesPath
-      : path.join(__dirname, "../../../resources");
+    const fromResources = findExistingPath(resolveAppIconPaths());
+    if (fromResources) return fromResources;
 
-    const candidates = [
-      path.join(resourcesRoot, "tray", "tray-icon.png"),
-      path.join(resourcesRoot, "icons", "icon.png"),
-      path.join(resourcesRoot, "icons", "512x512.png"),
-    ];
+    const logoSvg = path.join(app.getAppPath(), "public", "figma", "logo.svg");
+    if (fs.existsSync(logoSvg)) return logoSvg;
 
-    return candidates.find((candidate) => fs.existsSync(candidate));
+    // Dev fallback if utils path differs after compile
+    const alt = path.join(getResourcesRoot(), "icons", "icon.png");
+    return fs.existsSync(alt) ? alt : undefined;
   }
 
   private resolveIcon(): string | Electron.NativeImage | undefined {
-    const png = this.resolveIconPath();
-    if (png) return png;
-
-    const logoSvg = path.join(app.getAppPath(), "public", "figma", "logo.svg");
-    if (fs.existsSync(logoSvg)) {
-      const image = nativeImage.createFromPath(logoSvg);
+    const file = this.resolveIconPath();
+    if (!file) return undefined;
+    try {
+      const image = nativeImage.createFromPath(file);
       if (!image.isEmpty()) return image;
+    } catch {
+      // fall through
     }
-
-    return undefined;
+    return file.endsWith(".png") || file.endsWith(".ico") ? file : undefined;
   }
 
   list(): unknown[] {

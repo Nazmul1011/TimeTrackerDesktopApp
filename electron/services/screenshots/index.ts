@@ -182,18 +182,28 @@ export class ScreenshotService {
     } else if (process.platform === "darwin") {
       commands.push({ bin: "screencapture", args: ["-x", tmpPath] });
     } else if (process.platform === "win32") {
+      // Escape for single-quoted PowerShell string; capture full virtual desktop.
+      const safePath = tmpPath.replace(/'/g, "''");
       const ps = `
+$ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
-$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
 $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
 $g = [System.Drawing.Graphics]::FromImage($bmp)
-$g.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
-$bmp.Save('${tmpPath.replace(/'/g, "''")}')
+$g.CopyFromScreen($bounds.X, $bounds.Y, 0, 0, $bounds.Size)
+$bmp.Save('${safePath}', [System.Drawing.Imaging.ImageFormat]::Png)
 $g.Dispose(); $bmp.Dispose()
 `;
       commands.push({
-        bin: "powershell",
-        args: ["-NoProfile", "-Command", ps],
+        bin: "powershell.exe",
+        args: [
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          ps,
+        ],
       });
     }
 
@@ -202,6 +212,7 @@ $g.Dispose(); $bmp.Dispose()
         await execFileAsync(cmd.bin, cmd.args, {
           timeout: 8000,
           env: EXEC_ENV,
+          windowsHide: true,
         });
         const buffer = await fs.readFile(tmpPath);
         if (buffer.length < 100) {

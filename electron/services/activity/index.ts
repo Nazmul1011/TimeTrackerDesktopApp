@@ -3,8 +3,10 @@
  * Uses platform CLIs when available; falls back to a safe placeholder.
  */
 import { execFile } from "child_process";
+import path from "path";
 import { promisify } from "util";
 import log from "electron-log/main";
+import { getResourcesRoot } from "../../utils";
 
 const execFileAsync = promisify(execFile);
 
@@ -16,6 +18,8 @@ export type ActiveWindowInfo = {
 export class ActivityService {
   private static instance: ActivityService | null = null;
   private running = false;
+  private cache: { at: number; value: ActiveWindowInfo } | null = null;
+  private static readonly CACHE_MS = 2_500;
 
   static getInstance(): ActivityService {
     if (!ActivityService.instance) {
@@ -31,6 +35,7 @@ export class ActivityService {
 
   stop(): void {
     this.running = false;
+    this.cache = null;
     log.info("[ActivityService] stopped");
   }
 
@@ -39,16 +44,22 @@ export class ActivityService {
   }
 
   async getActiveWindow(): Promise<ActiveWindowInfo> {
+    if (this.cache && Date.now() - this.cache.at < ActivityService.CACHE_MS) {
+      return this.cache.value;
+    }
     try {
+      let value: ActiveWindowInfo;
       if (process.platform === "linux") {
-        return await this.getLinuxActiveWindow();
+        value = await this.getLinuxActiveWindow();
+      } else if (process.platform === "darwin") {
+        value = await this.getMacActiveWindow();
+      } else if (process.platform === "win32") {
+        value = await this.getWindowsActiveWindow();
+      } else {
+        value = { appName: "Desktop", windowTitle: "" };
       }
-      if (process.platform === "darwin") {
-        return await this.getMacActiveWindow();
-      }
-      if (process.platform === "win32") {
-        return await this.getWindowsActiveWindow();
-      }
+      this.cache = { at: Date.now(), value };
+      return value;
     } catch (error) {
       log.warn("[ActivityService] active window lookup failed", error);
     }
@@ -56,7 +67,6 @@ export class ActivityService {
   }
 
   private async getLinuxActiveWindow(): Promise<ActiveWindowInfo> {
-    // Prefer xdotool when on X11
     try {
       const { stdout: idOut } = await execFileAsync("xdotool", ["getactivewindow"], {
         timeout: 1500,
@@ -75,7 +85,6 @@ export class ActivityService {
           ["-id", windowId, "WM_CLASS"],
           { timeout: 1500 },
         );
-        // WM_CLASS is "instance", "class" — prefer instance (e.g. google-chrome)
         const match = classOut.match(/"([^"]+)"\s*,\s*"([^"]+)"/);
         if (match?.[1]) appName = match[1];
         else if (match?.[2]) appName = match[2];
@@ -84,7 +93,6 @@ export class ActivityService {
       }
       return { appName, windowTitle: title };
     } catch {
-      // Wayland / missing tools
       return { appName: "Desktop", windowTitle: "" };
     }
   }
@@ -108,33 +116,45 @@ export class ActivityService {
     return { appName: appName || "Desktop", windowTitle };
   }
 
+  /**
+   * Windows foreground window via user32 + process metadata.
+   * Uses a shipped PowerShell script for reliability on Windows.
+   */
   private async getWindowsActiveWindow(): Promise<ActiveWindowInfo> {
-    const ps = `
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-using System.Text;
-public class Win {
-  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-  [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
-  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
-}
-"@
-$hwnd = [Win]::GetForegroundWindow()
-$sb = New-Object System.Text.StringBuilder 512
-[void][Win]::GetWindowText($hwnd, $sb, $sb.Capacity)
-$pidOut = 0
-[void][Win]::GetWindowThreadProcessId($hwnd, [ref]$pidOut)
-$proc = Get-Process -Id $pidOut -ErrorAction SilentlyContinue
-$app = if ($proc) { $proc.ProcessName } else { "Desktop" }
-Write-Output ($app + "|||" + $sb.ToString())
-`;
-    const { stdout } = await execFileAsync(
-      "powershell",
-      ["-NoProfile", "-Command", ps],
-      { timeout: 3000 },
+    const scriptPath = path.join(
+      getResourcesRoot(),
+      "scripts",
+      "get-active-window.ps1",
     );
-    const [appName, windowTitle = ""] = stdout.trim().split("|||");
-    return { appName: appName || "Desktop", windowTitle };
+
+    const { stdout } = await execFileAsync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        scriptPath,
+      ],
+      {
+        timeout: 4000,
+        windowsHide: true,
+        maxBuffer: 1024 * 1024,
+      },
+    );
+
+    const line =
+      stdout
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .find((s) => s.includes("\u001e")) ?? stdout.trim();
+    const sep = line.indexOf("\u001e");
+    if (sep < 0) {
+      return { appName: line || "Desktop", windowTitle: "" };
+    }
+    const appName = line.slice(0, sep).trim() || "Desktop";
+    const windowTitle = line.slice(sep + 1).trim();
+    return { appName, windowTitle };
   }
 }

@@ -38,7 +38,7 @@ export class WindowRevealService {
     }
   }
 
-  /** Immediately show and focus the main window (works across Linux DEs). */
+  /** Immediately show and focus the main window (platform-aware). */
   revealNow(): void {
     const win = this.getMainWindow();
     if (!win) {
@@ -46,6 +46,36 @@ export class WindowRevealService {
       return;
     }
 
+    if (process.platform === "win32") {
+      this.revealWindows(win);
+    } else {
+      this.revealUnix(win);
+    }
+
+    log.info("[WindowRevealService] revealed main window");
+  }
+
+  private revealWindows(win: BrowserWindow): void {
+    if (win.isMinimized()) win.restore();
+    win.setAlwaysOnTop(true);
+    win.show();
+    win.focus();
+    try {
+      win.moveTop();
+    } catch {
+      // moveTop may be unavailable on some Electron builds
+    }
+    win.flashFrame(true);
+
+    setTimeout(() => {
+      if (win.isDestroyed()) return;
+      win.setAlwaysOnTop(false);
+      win.flashFrame(false);
+      win.focus();
+    }, 1200);
+  }
+
+  private revealUnix(win: BrowserWindow): void {
     if (win.isMinimized()) win.restore();
     win.show();
     win.setVisibleOnAllWorkspaces(true);
@@ -64,8 +94,6 @@ export class WindowRevealService {
       win.setVisibleOnAllWorkspaces(false);
       win.focus();
     }, 800);
-
-    log.info("[WindowRevealService] revealed main window");
   }
 
   private getMainWindow(): BrowserWindow | undefined {

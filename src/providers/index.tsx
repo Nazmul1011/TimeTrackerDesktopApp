@@ -9,6 +9,7 @@ import { ThemeProvider } from "./theme-provider";
 import { ToastProvider } from "./toast-provider";
 import { TooltipProvider } from "./tooltip-provider";
 import { DialogProvider } from "./dialog-provider";
+import { TrackingAgentProvider } from "./tracking-agent-provider";
 
 export function AppProviders({ children }: { children: ReactNode }) {
   return (
@@ -16,7 +17,9 @@ export function AppProviders({ children }: { children: ReactNode }) {
       <ThemeProvider>
         <TooltipProvider>
           <DialogProvider>
-            <ToastProvider>{children}</ToastProvider>
+            <ToastProvider>
+              <TrackingAgentProvider>{children}</TrackingAgentProvider>
+            </ToastProvider>
           </DialogProvider>
         </TooltipProvider>
       </ThemeProvider>

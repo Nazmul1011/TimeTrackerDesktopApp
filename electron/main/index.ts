@@ -16,6 +16,7 @@ import { applySecurityDefaults } from "./security";
 import { registerIpcHandlers } from "../ipc";
 import { initDatabase } from "../database/sqlite";
 import { SettingsService } from "../services/settings";
+import { WindowRevealService } from "../services/window-reveal";
 
 loadEnv();
 
@@ -29,6 +30,7 @@ if (process.platform === "linux") {
   );
 }
 
+// Must be set before ready — required for Windows toast notifications.
 if (process.platform === "win32") {
   app.setAppUserModelId("com.gr8r.timetracker");
 }
@@ -41,15 +43,12 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    const win = BrowserWindow.getAllWindows()[0];
-    if (win) {
-      if (win.isMinimized()) win.restore();
-      win.focus();
-    }
+    WindowRevealService.getInstance().revealNow();
   });
 }
 
 let mainWindow: BrowserWindow | null = null;
+let isQuitting = false;
 
 async function bootstrap(): Promise<void> {
   applySecurityDefaults();
@@ -58,6 +57,15 @@ async function bootstrap(): Promise<void> {
   SettingsService.getInstance().applyStoredLoginItem();
 
   mainWindow = createMainWindow();
+
+  // Keep tracking alive when the user closes the window — hide to tray instead.
+  mainWindow.on("close", (event) => {
+    if (isQuitting) return;
+    event.preventDefault();
+    mainWindow?.hide();
+    log.info("[main] window hidden to tray (tracking continues)");
+  });
+
   createAppMenu(mainWindow);
   createTray(mainWindow);
   initAutoUpdater(mainWindow);
@@ -69,17 +77,18 @@ app.whenReady().then(() => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       mainWindow = createMainWindow();
+    } else {
+      WindowRevealService.getInstance().revealNow();
     }
   });
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+  // Window is hidden to tray, not destroyed — do not quit here.
 });
 
 app.on("before-quit", () => {
+  isQuitting = true;
   log.info("[main] Application quitting");
 });
 
