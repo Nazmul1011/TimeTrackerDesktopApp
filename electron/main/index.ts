@@ -7,6 +7,7 @@ import { app, BrowserWindow } from "electron";
 import log from "electron-log/main";
 import { config as loadEnv } from "dotenv";
 import path from "path";
+import { applyDockIcon, applyDockIconSoon } from "../utils/dock-icon";
 
 import { createMainWindow } from "./window";
 import { createTray } from "./tray";
@@ -17,8 +18,12 @@ import { registerIpcHandlers } from "../ipc";
 import { initDatabase } from "../database/sqlite";
 import { SettingsService } from "../services/settings";
 import { WindowRevealService } from "../services/window-reveal";
+import { AppIconService, registerAppIconScheme } from "../services/app-icon";
 
 loadEnv();
+
+// Custom icon protocol must be registered before app is ready.
+registerAppIconScheme();
 
 log.transports.file.level = "info";
 log.info("[main] Starting Gr8r Time Tracker desktop client");
@@ -52,24 +57,12 @@ let isQuitting = false;
 
 async function bootstrap(): Promise<void> {
   applySecurityDefaults();
+  AppIconService.getInstance().bindProtocol();
   initDatabase();
   registerIpcHandlers();
   SettingsService.getInstance().applyStoredLoginItem();
 
-  if (process.platform === "darwin") {
-    try {
-      const { findExistingPath, resolveAppIconPaths } = await import("../utils");
-      const iconPath = findExistingPath(resolveAppIconPaths());
-      if (iconPath && app.dock) {
-        const { nativeImage } = await import("electron");
-        const image = nativeImage.createFromPath(iconPath);
-        if (!image.isEmpty()) app.dock.setIcon(image);
-      }
-    } catch (error) {
-      log.warn("[main] dock icon failed", error);
-    }
-  }
-
+  applyDockIconSoon();
   mainWindow = createMainWindow();
 
   // Keep tracking alive when the user closes the window — hide to tray/dock instead.
@@ -86,6 +79,8 @@ async function bootstrap(): Promise<void> {
 }
 
 app.whenReady().then(() => {
+  // Dev runs the stock Electron.app, so the Dock stays the atom until this runs.
+  applyDockIcon();
   void bootstrap();
 
   app.on("activate", () => {

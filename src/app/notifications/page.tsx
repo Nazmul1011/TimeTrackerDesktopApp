@@ -14,7 +14,11 @@ import { ROUTES } from "@/constants/routes";
 import { useNotificationNavigation } from "@/hooks/useNotificationNavigation";
 import { useNotifications } from "@/hooks/useNotifications";
 import { dayjs } from "@/lib/dayjs";
-import { useSettingsStore } from "@/store/settings.store";
+import {
+  DEFAULT_IDLE_TIMEOUT_MINUTES,
+  formatIdleTimeoutLabel,
+  useSettingsStore,
+} from "@/store/settings.store";
 import { ScreenshotDeletionReview } from "@/components/screenshots/screenshot-deletion-review";
 import type { AppNotification, NotificationKind } from "@/types";
 import { cn } from "@/lib/utils";
@@ -48,27 +52,19 @@ function InboxItem({
         notification.read ? "bg-white" : "bg-[var(--surface-elevated)]",
       )}
     >
-      <button
-        type="button"
-        className="w-full text-left"
-        onClick={() => onOpen(notification)}
-      >
+      <button type="button" className="w-full text-left" onClick={() => onOpen(notification)}>
         <div className="flex items-start gap-3">
           <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-[#ebebeb]">
             <FigmaGlyph src={iconForKind(notification.kind)} size={16} />
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-2">
-              <p className="text-xs font-medium text-[#1e2939]">
-                {notification.title}
-              </p>
+              <p className="text-xs font-medium text-[#1e2939]">{notification.title}</p>
               <span className="shrink-0 text-[10px] text-[var(--text-muted)]">
                 {dayjs(notification.createdAt).fromNow()}
               </span>
             </div>
-            <p className="mt-1 text-xs leading-4 text-[var(--text-subtle)]">
-              {notification.body}
-            </p>
+            <p className="mt-1 text-xs leading-4 text-[var(--text-subtle)]">{notification.body}</p>
           </div>
         </div>
       </button>
@@ -165,9 +161,7 @@ export default function NotificationsPage() {
         <div className="flex items-center justify-between border-b border-[#e5e5e5] px-4 py-3">
           <div>
             <p className="text-xs text-[#1e2939]">Push Notifications</p>
-            <p className="text-xs text-[var(--text-muted)]">
-              Timer reminders & alerts
-            </p>
+            <p className="text-xs text-[var(--text-muted)]">Timer reminders & alerts</p>
           </div>
           <Switch
             checked={settings.notificationsEnabled}
@@ -187,7 +181,7 @@ export default function NotificationsPage() {
             <p className="text-xs text-[#1e2939]">Idle Detection</p>
             <p className="text-xs text-[var(--text-muted)]">
               {settings.idleTimeoutMinutes > 0
-                ? `Auto-pause after ${settings.idleTimeoutMinutes} min idle`
+                ? `Auto-pause after ${formatIdleTimeoutLabel(settings.idleTimeoutMinutes)} idle`
                 : "Auto-pause when idle is off"}
             </p>
           </div>
@@ -197,10 +191,10 @@ export default function NotificationsPage() {
             onCheckedChange={(checked) => {
               void toggleSetting(
                 "idle",
-                { idleTimeoutMinutes: checked ? 3 : 0 },
-                checked
-                  ? "Idle detection on (3 min)"
-                  : "Idle detection off",
+                {
+                  idleTimeoutMinutes: checked ? DEFAULT_IDLE_TIMEOUT_MINUTES : 0,
+                },
+                checked ? "Idle detection on (3 min)" : "Idle detection off",
               );
             }}
           />
@@ -211,9 +205,7 @@ export default function NotificationsPage() {
             <p className="text-xs font-medium text-[#1e2939]">
               Inbox
               {unreadCount > 0 ? (
-                <span className="ml-1.5 text-[var(--text-muted)]">
-                  ({unreadCount} unread)
-                </span>
+                <span className="ml-1.5 text-[var(--text-muted)]">({unreadCount} unread)</span>
               ) : null}
             </p>
             {unreadCount > 0 ? (
@@ -229,9 +221,7 @@ export default function NotificationsPage() {
 
           <ScrollArea className="h-[280px] pr-2">
             {isLoading && notifications.length === 0 ? (
-              <p className="py-6 text-center text-xs text-[var(--text-muted)]">
-                Loading…
-              </p>
+              <p className="py-6 text-center text-xs text-[var(--text-muted)]">Loading…</p>
             ) : error && notifications.length === 0 ? (
               <div className="py-6 text-center">
                 <p className="text-xs text-[var(--text-muted)]">{error}</p>
@@ -245,8 +235,8 @@ export default function NotificationsPage() {
               </div>
             ) : notifications.length === 0 ? (
               <p className="py-6 text-center text-xs text-[var(--text-muted)]">
-                No notifications yet. Alerts from leave, payroll, and screenshot
-                requests appear here.
+                No notifications yet. Alerts from leave, payroll, and screenshot requests appear
+                here.
               </p>
             ) : (
               <ul className="space-y-2">

@@ -38,14 +38,14 @@ interface TimesheetRowProps {
   projectLabel: string;
   duration: string;
   isActive?: boolean;
+  /** running = pause icon. paused/idle = play icon. */
+  playState?: "running" | "paused";
+  playEnabled?: boolean;
   unlinked?: boolean;
   showMenu?: boolean;
   compact?: boolean;
   onPlay?: () => void;
-  onSave: (payload: {
-    description: string;
-    projectId: string | null;
-  }) => Promise<void>;
+  onSave: (payload: { description: string; projectId: string | null }) => Promise<void>;
   onDelete: () => Promise<void>;
 }
 
@@ -55,6 +55,8 @@ export function TimesheetRow({
   projectLabel,
   duration,
   isActive,
+  playState = "paused",
+  playEnabled = false,
   unlinked,
   showMenu = true,
   compact,
@@ -91,7 +93,10 @@ export function TimesheetRow({
 
   useEffect(() => {
     if (!menuOpen || !editMode) return;
-    void projectsApi.listMine().then(setProjects).catch(() => setProjects([]));
+    void projectsApi
+      .listMine()
+      .then(setProjects)
+      .catch(() => setProjects([]));
   }, [editMode, menuOpen]);
 
   const handleSave = async () => {
@@ -143,7 +148,7 @@ export function TimesheetRow({
 
           <div
             className={cn(
-              "flex max-w-[120px] min-w-0 shrink-0 items-center gap-1 rounded-lg border border-[#e6e6e6] bg-white px-2 py-1",
+              "flex min-w-0 max-w-[120px] shrink-0 items-center gap-1 rounded-lg border border-[#e6e6e6] bg-white px-2 py-1",
               unlinked && "flex-1",
             )}
           >
@@ -157,27 +162,38 @@ export function TimesheetRow({
           </div>
         </div>
 
-        <span className="w-[50px] shrink-0 px-2 py-1 text-right text-xs tabular-nums leading-4 text-[#1e2939]">
+        <span className="w-[64px] shrink-0 px-1 py-1 text-right text-xs tabular-nums leading-4 text-[#1e2939]">
           {duration}
         </span>
 
         <button
           type="button"
-          className="flex size-6 shrink-0 items-center justify-center rounded-full border border-[#ededed] bg-white p-1.5 outline-none transition-colors hover:bg-[#f5f5f5]"
-          onClick={onPlay}
-          aria-label={`Play ${title}`}
+          disabled={!playEnabled}
+          className={cn(
+            "flex size-6 shrink-0 items-center justify-center rounded-full border border-[#ededed] bg-white p-1.5 outline-none",
+            playEnabled ? "transition-colors hover:bg-[#f5f5f5]" : "cursor-not-allowed opacity-40",
+          )}
+          onClick={playEnabled ? onPlay : undefined}
+          aria-label={
+            !playEnabled
+              ? "Only the latest entry can be controlled"
+              : playState === "running"
+                ? `Pause ${title}`
+                : `Play ${title}`
+          }
         >
-          <FigmaGlyph src="/figma/icon-play-blue.svg" size={12} />
+          <FigmaGlyph
+            src={
+              playState === "running" ? "/figma/icon-pause-blue.svg" : "/figma/icon-play-blue.svg"
+            }
+            size={12}
+          />
         </button>
 
         {showMenu ? (
           <DropdownMenu open={menuOpen} onOpenChange={handleMenuOpenChange} modal={false}>
             <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="size-4 shrink-0 outline-none"
-                aria-label="Row menu"
-              >
+              <button type="button" className="size-4 shrink-0 outline-none" aria-label="Row menu">
                 <FigmaGlyph src="/figma/icon-more.svg" size={16} />
               </button>
             </DropdownMenuTrigger>
@@ -328,8 +344,8 @@ export function TimesheetRow({
           <DialogHeader className="space-y-1">
             <DialogTitle className="text-sm">Delete time entry?</DialogTitle>
             <DialogDescription className="text-xs">
-              This removes &ldquo;{title}&rdquo; ({duration}) from today&apos;s timesheet.
-              This action cannot be undone.
+              This removes &ldquo;{title}&rdquo; ({duration}) from today&apos;s timesheet. This
+              action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-2">

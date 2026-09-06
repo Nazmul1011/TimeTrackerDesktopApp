@@ -21,13 +21,11 @@ export class WindowRevealService {
     this.cancel();
     if (!Number.isFinite(delayMs) || delayMs <= 0) return;
 
-    log.info(
-      `[WindowRevealService] scheduled reveal in ${Math.round(delayMs / 1000)}s`,
-    );
+    log.info(`[WindowRevealService] scheduled reveal in ${Math.round(delayMs / 1000)}s`);
 
     this.revealTimer = setTimeout(() => {
       this.revealTimer = null;
-      this.revealNow();
+      this.revealNow({ bounce: true });
     }, delayMs);
   }
 
@@ -39,7 +37,7 @@ export class WindowRevealService {
   }
 
   /** Immediately show and focus the main window (platform-aware). */
-  revealNow(): void {
+  revealNow(options?: { bounce?: boolean }): void {
     const win = this.getMainWindow();
     if (!win) {
       log.warn("[WindowRevealService] no window to reveal");
@@ -49,7 +47,7 @@ export class WindowRevealService {
     if (process.platform === "win32") {
       this.revealWindows(win);
     } else if (process.platform === "darwin") {
-      this.revealMac(win);
+      this.revealMac(win, options?.bounce === true);
     } else {
       this.revealLinux(win);
     }
@@ -77,7 +75,7 @@ export class WindowRevealService {
     }, 1200);
   }
 
-  private revealMac(win: BrowserWindow): void {
+  private revealMac(win: BrowserWindow, bounce: boolean): void {
     if (win.isMinimized()) win.restore();
     win.show();
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -87,7 +85,8 @@ export class WindowRevealService {
     try {
       app.dock?.show();
       app.focus({ steal: true });
-      app.dock?.bounce("informational");
+      // Bounce only for idle-resume attention — it resets dock.setIcon().
+      if (bounce) app.dock?.bounce("informational");
     } catch {
       try {
         app.focus();

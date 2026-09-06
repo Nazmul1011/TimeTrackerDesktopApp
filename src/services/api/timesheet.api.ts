@@ -1,6 +1,7 @@
 /**
  * Timesheet / time entries API.
  */
+import { getOrgTimezone, todayInZone } from "@/lib/org-date";
 import { apiClient } from "./client";
 import type { ApiResponse } from "./types";
 
@@ -18,27 +19,23 @@ export type ApiTimeEntry = {
   status?: string;
 };
 
-export function toIsoDate(date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 export const timesheetApi = {
-  async listToday() {
-    const today = toIsoDate();
-    const { data } = await apiClient.get<
-      ApiResponse<{ entries: ApiTimeEntry[] }>
-    >("/time-entries", {
-      params: { startDate: today, endDate: today, limit: 100 },
-    });
+  /** @param timeZone org IANA zone; defaults to the active org's. */
+  async listToday(timeZone?: string | null) {
+    // The org's calendar day, not the device's — see lib/org-date.
+    const today = todayInZone(timeZone ?? getOrgTimezone());
+    const { data } = await apiClient.get<ApiResponse<{ entries: ApiTimeEntry[] }>>(
+      "/time-entries",
+      {
+        params: { startDate: today, endDate: today, limit: 100 },
+      },
+    );
     return data.data?.entries ?? [];
   },
 
   /** Total saved seconds for today (completed time entries only). */
-  async getTodayLoggedSeconds() {
-    const entries = await this.listToday();
+  async getTodayLoggedSeconds(timeZone?: string | null) {
+    const entries = await this.listToday(timeZone);
     return entries.reduce((sum, entry) => sum + (entry.duration ?? 0), 0);
   },
 
@@ -49,16 +46,17 @@ export const timesheetApi = {
       projectId?: string | null;
     },
   ) {
-    const { data } = await apiClient.patch<
-      ApiResponse<{ entry: ApiTimeEntry }>
-    >(`/time-entries/${id}`, payload);
+    const { data } = await apiClient.patch<ApiResponse<{ entry: ApiTimeEntry }>>(
+      `/time-entries/${id}`,
+      payload,
+    );
     return data.data?.entry;
   },
 
   async delete(id: string) {
-    const { data } = await apiClient.delete<
-      ApiResponse<{ id: string; deleted: boolean }>
-    >(`/time-entries/${id}`);
+    const { data } = await apiClient.delete<ApiResponse<{ id: string; deleted: boolean }>>(
+      `/time-entries/${id}`,
+    );
     return data.data;
   },
 };

@@ -7,12 +7,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { dayjs } from "@/lib/dayjs";
 import { SCREENSHOT_CAPTURED_EVENT } from "@/hooks/useTrackingAgent";
 import { emitNotificationsChanged } from "@/hooks/useNotifications";
+import { useOrgTimezone } from "@/hooks/useOrgTimezone";
 import { screenshotApi, resolveScreenshotUrl } from "@/services/api/screenshot.api";
 import { useAuthStore } from "@/store/auth.store";
-import {
-  ScreenshotCard,
-  type ScreenshotItem,
-} from "@/components/screenshots/screenshot-card";
+import { ScreenshotCard, type ScreenshotItem } from "@/components/screenshots/screenshot-card";
 
 function mapApiToItem(item: {
   id: string;
@@ -29,14 +27,15 @@ function mapApiToItem(item: {
     capturedAt: item.capturedAt,
     appName: item.appName,
     timeLabel: dayjs(item.capturedAt).format("hh:mm A"),
-    activityPercent:
-      typeof item.activityPercent === "number" ? item.activityPercent : null,
+    activityPercent: typeof item.activityPercent === "number" ? item.activityPercent : null,
     deleteRequested: Boolean(item.deleteRequested),
   };
 }
 
 export function ScreenshotGrid() {
   const organizationId = useAuthStore((s) => s.organizationId);
+  // Arrives with the org list, after the first render on a cold start.
+  const orgTimezone = useOrgTimezone();
   const [items, setItems] = useState<ScreenshotItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -49,25 +48,39 @@ export function ScreenshotGrid() {
         setLoading(false);
         return;
       }
+      // A reply for the org we just left must never overwrite the current one.
+      const requestedOrg = organizationId;
+      const isStale = () => useAuthStore.getState().organizationId !== requestedOrg;
+
       if (!opts?.silent && !loadedOnceRef.current) {
         setLoading(true);
       }
       setError(null);
       try {
-        const rows = await screenshotApi.listToday(100);
+        const rows = await screenshotApi.listToday(100, orgTimezone);
+        if (isStale()) return;
         setItems(rows.map(mapApiToItem));
         loadedOnceRef.current = true;
       } catch {
+        if (isStale()) return;
         if (!loadedOnceRef.current) {
           setError("Could not load screenshots");
           setItems([]);
         }
       } finally {
-        setLoading(false);
+        if (!isStale()) setLoading(false);
       }
     },
-    [organizationId],
+    [organizationId, orgTimezone],
   );
+
+  // Each org starts fresh: clear the previous org's shots and let the
+  // loading/error states apply again for the new one.
+  useEffect(() => {
+    loadedOnceRef.current = false;
+    setItems([]);
+    setError(null);
+  }, [organizationId]);
 
   useEffect(() => {
     void reload();
@@ -75,11 +88,13 @@ export function ScreenshotGrid() {
 
   useEffect(() => {
     const onCaptured = (event: Event) => {
-      const detail = (event as CustomEvent<{
-        id?: string;
-        url?: string;
-        activityPercent?: number;
-      }>).detail;
+      const detail = (
+        event as CustomEvent<{
+          id?: string;
+          url?: string;
+          activityPercent?: number;
+        }>
+      ).detail;
       if (detail?.id && detail?.url) {
         const imageUrl = resolveScreenshotUrl(detail.url) ?? detail.url;
         setItems((prev) => {
@@ -92,9 +107,7 @@ export function ScreenshotGrid() {
               appName: null,
               timeLabel: dayjs().format("hh:mm A"),
               activityPercent:
-                typeof detail.activityPercent === "number"
-                  ? detail.activityPercent
-                  : null,
+                typeof detail.activityPercent === "number" ? detail.activityPercent : null,
             },
             ...prev,
           ];
@@ -114,18 +127,12 @@ export function ScreenshotGrid() {
   }, [reload]);
 
   const handleRequestDelete = async (id: string) => {
-    setItems((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, deleteRequested: true } : s)),
-    );
+    setItems((prev) => prev.map((s) => (s.id === id ? { ...s, deleteRequested: true } : s)));
     try {
       await screenshotApi.requestDeletion(id);
       emitNotificationsChanged();
     } catch {
-      setItems((prev) =>
-        prev.map((s) =>
-          s.id === id ? { ...s, deleteRequested: false } : s,
-        ),
-      );
+      setItems((prev) => prev.map((s) => (s.id === id ? { ...s, deleteRequested: false } : s)));
       throw new Error("delete-request-failed");
     }
   };
@@ -157,11 +164,7 @@ export function ScreenshotGrid() {
   return (
     <div className="grid grid-cols-2 gap-2">
       {items.map((item) => (
-        <ScreenshotCard
-          key={item.id}
-          item={item}
-          onRequestDelete={handleRequestDelete}
-        />
+        <ScreenshotCard key={item.id} item={item} onRequestDelete={handleRequestDelete} />
       ))}
     </div>
   );

@@ -17,10 +17,11 @@ export interface ElectronAPI {
     getStatus: () => Promise<unknown>;
   };
   activity: {
-    getIdleState: (
-      thresholdSeconds?: number,
-    ) => Promise<{ idle: boolean; idleMs: number }>;
+    getIdleState: (thresholdSeconds?: number) => Promise<{ idle: boolean; idleMs: number }>;
     getActiveWindow: () => Promise<{ appName: string; windowTitle: string }>;
+    /** Real OS app icon as data-URL PNG, or null */
+    getAppIcon: (appName: string) => Promise<string | null>;
+    getAppIcons: (appNames: string[]) => Promise<Record<string, string | null>>;
     getSummary: () => Promise<unknown>;
     start: () => Promise<{ ok: boolean }>;
     stop: () => Promise<{ ok: boolean }>;
@@ -68,19 +69,11 @@ export interface ElectronAPI {
     }>;
     status: () => Promise<{ running: boolean }>;
     onUploaded: (
-      callback: (payload: {
-        id?: string;
-        url?: string;
-        activityPercent?: number;
-      }) => void,
+      callback: (payload: { id?: string; url?: string; activityPercent?: number }) => void,
     ) => () => void;
-    onFailed: (
-      callback: (payload: { message?: string }) => void,
-    ) => () => void;
+    onFailed: (callback: (payload: { message?: string }) => void) => () => void;
     onAuthExpired: (callback: () => void) => () => void;
-    onTokenRefreshed: (
-      callback: (payload: { accessToken?: string }) => void,
-    ) => () => void;
+    onTokenRefreshed: (callback: (payload: { accessToken?: string }) => void) => () => void;
     onIdleTimeout: (
       callback: (payload?: { intervalMs?: number; activityPercent?: number }) => void,
     ) => () => void;
@@ -126,9 +119,7 @@ export interface ElectronAPI {
     getStatus: () => Promise<unknown>;
   };
   window: {
-    scheduleRevealAfterResume: (payload?: {
-      delayMs?: number;
-    }) => Promise<{ ok: boolean }>;
+    scheduleRevealAfterResume: (payload?: { delayMs?: number }) => Promise<{ ok: boolean }>;
     cancelReveal: () => Promise<{ ok: boolean }>;
     revealNow: () => Promise<{ ok: boolean }>;
   };

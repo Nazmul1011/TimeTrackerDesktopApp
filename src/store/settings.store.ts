@@ -20,10 +20,20 @@ interface SettingsState {
   reset: () => Promise<void>;
 }
 
+/** Idle auto-pause when detection is on. Production default: 3 minutes. */
+export const DEFAULT_IDLE_TIMEOUT_MINUTES = 3;
+
+export function formatIdleTimeoutLabel(minutes: number): string {
+  if (minutes <= 0) return "off";
+  const seconds = Math.round(minutes * 60);
+  if (seconds < 60) return `${seconds} sec`;
+  return `${minutes} min`;
+}
+
 export const defaultSettings: Settings = {
   theme: "light",
   screenshotIntervalMinutes: 5,
-  idleTimeoutMinutes: 3,
+  idleTimeoutMinutes: DEFAULT_IDLE_TIMEOUT_MINUTES,
   autoStartOnLogin: false,
   notificationsEnabled: true,
 };
@@ -31,20 +41,19 @@ export const defaultSettings: Settings = {
 function mergeSettings(partial: Partial<Settings>, base: Settings): Settings {
   return {
     theme:
-      partial.theme === "light" ||
-      partial.theme === "dark" ||
-      partial.theme === "system"
+      partial.theme === "light" || partial.theme === "dark" || partial.theme === "system"
         ? partial.theme
         : base.theme,
     screenshotIntervalMinutes:
-      typeof partial.screenshotIntervalMinutes === "number" &&
-      partial.screenshotIntervalMinutes > 0
+      typeof partial.screenshotIntervalMinutes === "number" && partial.screenshotIntervalMinutes > 0
         ? partial.screenshotIntervalMinutes
         : base.screenshotIntervalMinutes,
     idleTimeoutMinutes:
-      typeof partial.idleTimeoutMinutes === "number" &&
-      partial.idleTimeoutMinutes >= 0
-        ? partial.idleTimeoutMinutes
+      typeof partial.idleTimeoutMinutes === "number" && partial.idleTimeoutMinutes >= 0
+        ? // Test defaults were 30s (0.5) and 3s (0.05); the only control is a toggle.
+          partial.idleTimeoutMinutes === 0.5 || partial.idleTimeoutMinutes === 0.05
+          ? DEFAULT_IDLE_TIMEOUT_MINUTES
+          : partial.idleTimeoutMinutes
         : base.idleTimeoutMinutes,
     autoStartOnLogin:
       typeof partial.autoStartOnLogin === "boolean"
@@ -77,8 +86,7 @@ async function pushToElectron(
   } catch (err) {
     return {
       ok: false,
-      message:
-        err instanceof Error ? err.message : "Failed to save desktop settings",
+      message: err instanceof Error ? err.message : "Failed to save desktop settings",
     };
   }
 }
@@ -91,8 +99,7 @@ export const useSettingsStore = create<SettingsState>()(
 
       markReady: () => set({ ready: true }),
 
-      replaceSettings: (settings) =>
-        set({ settings: mergeSettings(settings, defaultSettings) }),
+      replaceSettings: (settings) => set({ settings: mergeSettings(settings, defaultSettings) }),
 
       setSettings: async (partial) => {
         const prev = get().settings;

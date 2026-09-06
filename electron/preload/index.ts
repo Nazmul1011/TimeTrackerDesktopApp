@@ -28,8 +28,7 @@ const electronAPI = {
   tracking: {
     start: (payload: unknown) => ipcRenderer.invoke("tracking:start", payload),
     stop: () => ipcRenderer.invoke("tracking:stop"),
-    updateAuth: (payload: unknown) =>
-      ipcRenderer.invoke("tracking:updateAuth", payload),
+    updateAuth: (payload: unknown) => ipcRenderer.invoke("tracking:updateAuth", payload),
     captureNow: () => ipcRenderer.invoke("tracking:captureNow"),
     status: () => ipcRenderer.invoke("tracking:status"),
     onUploaded: (callback: (payload: unknown) => void) => {
@@ -48,11 +47,9 @@ const electronAPI = {
       return () => ipcRenderer.removeListener("tracking:auth-expired", listener);
     },
     onTokenRefreshed: (callback: (payload: { accessToken?: string }) => void) => {
-      const listener = (_event: unknown, payload: { accessToken?: string }) =>
-        callback(payload);
+      const listener = (_event: unknown, payload: { accessToken?: string }) => callback(payload);
       ipcRenderer.on("tracking:token-refreshed", listener);
-      return () =>
-        ipcRenderer.removeListener("tracking:token-refreshed", listener);
+      return () => ipcRenderer.removeListener("tracking:token-refreshed", listener);
     },
     onIdleTimeout: (callback: (payload: unknown) => void) => {
       const listener = (_event: unknown, payload: unknown) => callback(payload);
@@ -65,6 +62,8 @@ const electronAPI = {
     getIdleState: (thresholdSeconds?: number) =>
       ipcRenderer.invoke("activity:getIdleState", thresholdSeconds),
     getActiveWindow: () => ipcRenderer.invoke("activity:getActiveWindow"),
+    getAppIcon: (appName: string) => ipcRenderer.invoke("activity:getAppIcon", appName),
+    getAppIcons: (appNames: string[]) => ipcRenderer.invoke("activity:getAppIcons", appNames),
     getSummary: () => ipcRenderer.invoke("activity:getSummary"),
     start: () => ipcRenderer.invoke("activity:start"),
     stop: () => ipcRenderer.invoke("activity:stop"),

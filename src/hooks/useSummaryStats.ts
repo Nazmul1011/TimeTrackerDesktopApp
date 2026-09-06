@@ -4,10 +4,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { dayjs } from "@/lib/dayjs";
+import { useOrgTimezone } from "@/hooks/useOrgTimezone";
+import { monthEndYmd, monthStartYmd, todayInZone, weekEndYmd, weekStartYmd } from "@/lib/org-date";
 import { TIMER_STOPPED_EVENT } from "@/lib/timer-events";
 import { reportsApi } from "@/services/api/reports.api";
-import { toIsoDate } from "@/services/api/timesheet.api";
 import { useAuthStore } from "@/store/auth.store";
 
 export type PeriodSummary = {
@@ -21,23 +21,6 @@ export type SummaryStats = {
   month: PeriodSummary;
   week: PeriodSummary;
 };
-
-function startOfWeekMonday(date = new Date()): Date {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  const day = d.getDay(); // 0 Sun … 6 Sat
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  return d;
-}
-
-function endOfWeekSunday(date = new Date()): Date {
-  const start = startOfWeekMonday(date);
-  const end = new Date(start);
-  end.setDate(start.getDate() + 6);
-  end.setHours(23, 59, 59, 999);
-  return end;
-}
 
 function emptyStats(): SummaryStats {
   return {
@@ -56,15 +39,19 @@ function emptyStats(): SummaryStats {
   };
 }
 
-/** Display like Figma: `84h` (whole hours). */
+/** `17h 29m` — hours and leftover minutes (not rounded away). */
 export function formatSummaryHours(hours: number): string {
-  const n = Math.max(0, Math.round(hours));
-  return `${n}h`;
+  const totalMinutes = Math.max(0, Math.round(hours * 60));
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${h}h ${m}m`;
 }
 
 export function useSummaryStats() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const organizationId = useAuthStore((s) => s.organizationId);
+  // Arrives with the org list, after the first render on a cold start.
+  const orgTimezone = useOrgTimezone();
   const [stats, setStats] = useState<SummaryStats>(emptyStats);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -76,15 +63,20 @@ export function useSummaryStats() {
       return;
     }
 
+    // A reply for the org we just left must never overwrite the current one.
+    const requestedOrg = organizationId;
+    const isStale = () => useAuthStore.getState().organizationId !== requestedOrg;
+
     setIsLoading(true);
     setError(null);
 
-    const now = new Date();
-    const today = toIsoDate(now);
-    const monthStart = toIsoDate(dayjs(now).startOf("month").toDate());
-    const monthEnd = toIsoDate(dayjs(now).endOf("month").toDate());
-    const weekStart = toIsoDate(startOfWeekMonday(now));
-    const weekEnd = toIsoDate(endOfWeekSunday(now));
+    // Ranges follow the org's calendar, matching how the backend stores days.
+    const timeZone = orgTimezone;
+    const today = todayInZone(timeZone);
+    const monthStart = monthStartYmd(timeZone);
+    const monthEnd = monthEndYmd(timeZone);
+    const weekStart = weekStartYmd(timeZone);
+    const weekEnd = weekEndYmd(timeZone);
 
     try {
       const [monthSoFar, monthGoal, weekSoFar, weekGoal] = await Promise.all([
@@ -93,6 +85,8 @@ export function useSummaryStats() {
         reportsApi.getSummary({ startDate: weekStart, endDate: today }),
         reportsApi.getSummary({ startDate: weekStart, endDate: weekEnd }),
       ]);
+
+      if (isStale()) return;
 
       setStats({
         month: {
@@ -109,22 +103,30 @@ export function useSummaryStats() {
         },
       });
     } catch (err) {
+      if (isStale()) return;
+      // Never leave the previous org's hours on screen behind an error.
+      setStats(emptyStats());
       const message =
         typeof err === "object" &&
         err !== null &&
         "response" in err &&
-        (err as { response?: { data?: { message?: string } } }).response?.data
-          ?.message
-          ? (err as { response: { data: { message: string } } }).response.data
-              .message
+        (err as { response?: { data?: { message?: string } } }).response?.data?.message
+          ? (err as { response: { data: { message: string } } }).response.data.message
           : err instanceof Error
             ? err.message
             : "Failed to load summary";
       setError(message);
     } finally {
-      setIsLoading(false);
+      if (!isStale()) setIsLoading(false);
     }
-  }, [isAuthenticated, organizationId]);
+  }, [isAuthenticated, organizationId, orgTimezone]);
+
+  // Drop the previous org's numbers immediately rather than showing them
+  // until the new org's request lands.
+  useEffect(() => {
+    setStats(emptyStats());
+    setError(null);
+  }, [organizationId]);
 
   useEffect(() => {
     void reload();

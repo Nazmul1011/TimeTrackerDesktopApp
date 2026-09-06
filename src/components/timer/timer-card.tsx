@@ -5,18 +5,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { dayjs } from "@/lib/dayjs";
+import { formatElapsed } from "@/lib/dayjs";
+import { monthDayLabelInZone, weekdayLabelInZone } from "@/lib/org-date";
+import { useOrgTimezone } from "@/hooks/useOrgTimezone";
 import {
   codeFromProjectName,
-  formatProjectHhMm,
   formatProjectTriggerTime,
   projectMenuIcon,
 } from "@/lib/project-icons";
-import {
-  GENERAL_PROJECT,
-  GENERAL_TIME_KEY,
-  isValidProjectId,
-} from "@/lib/project";
+import { GENERAL_PROJECT, GENERAL_TIME_KEY, isValidProjectId } from "@/lib/project";
 import { TIMER_STOPPED_EVENT } from "@/lib/timer-events";
 import { useTimer } from "@/hooks/useTimer";
 import { projectsApi, type ApiProject } from "@/services/api/projects.api";
@@ -51,10 +48,10 @@ const fieldClass =
 
 export function TimerCard() {
   const organizationId = useAuthStore((s) => s.organizationId);
+  const orgTimezone = useOrgTimezone();
   const {
     timer,
-    display,
-    todayLoggedMs,
+    selectedProjectId,
     isRunning,
     isPaused,
     isIdle,
@@ -67,9 +64,7 @@ export function TimerCard() {
   } = useTimer();
 
   const [projects, setProjects] = useState<ApiProject[]>([]);
-  const [secondsByProject, setSecondsByProject] = useState<Record<string, number>>(
-    {},
-  );
+  const [secondsByProject, setSecondsByProject] = useState<Record<string, number>>({});
   const [menuOpen, setMenuOpen] = useState(false);
   const [createMode, setCreateMode] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
@@ -90,7 +85,7 @@ export function TimerCard() {
   const loadTodayByProject = useCallback(async () => {
     if (!organizationId) return;
     try {
-      const rows = await timesheetApi.listToday();
+      const rows = await timesheetApi.listToday(orgTimezone);
       const next: Record<string, number> = {};
       for (const row of rows) {
         const key = row.projectId ?? GENERAL_TIME_KEY;
@@ -100,7 +95,7 @@ export function TimerCard() {
     } catch {
       setSecondsByProject({});
     }
-  }, [organizationId]);
+  }, [organizationId, orgTimezone]);
 
   useEffect(() => {
     void loadProjects();
@@ -108,15 +103,15 @@ export function TimerCard() {
   }, [loadProjects, loadTodayByProject]);
 
   useEffect(() => {
-    if (!timer.projectId) return;
-    if (!isValidProjectId(timer.projectId)) {
+    if (!selectedProjectId) return;
+    if (!isValidProjectId(selectedProjectId)) {
       setProject(null);
       return;
     }
-    if (projects.length && !projects.some((p) => p.id === timer.projectId)) {
+    if (projects.length && !projects.some((p) => p.id === selectedProjectId)) {
       setProject(null);
     }
-  }, [projects, setProject, timer.projectId]);
+  }, [projects, selectedProjectId, setProject]);
 
   useEffect(() => {
     const handler = () => {
@@ -135,12 +130,12 @@ export function TimerCard() {
     return [...names].sort((a, b) => a.localeCompare(b));
   }, [projects]);
 
-  const isGeneral = timer.projectId == null;
+  const isGeneral = selectedProjectId == null;
   const selectedProject = isGeneral
     ? null
-    : (projects.find((p) => p.id === timer.projectId) ??
-      (isValidProjectId(timer.projectId)
-        ? { id: timer.projectId!, name: "Project", color: "#94a3b8" }
+    : (projects.find((p) => p.id === selectedProjectId) ??
+      (isValidProjectId(selectedProjectId)
+        ? { id: selectedProjectId!, name: "Project", color: "#94a3b8" }
         : null));
 
   const displayName = isGeneral
@@ -149,20 +144,20 @@ export function TimerCard() {
   const triggerIcon = isGeneral
     ? projectMenuIcon(0)
     : projectMenuIcon(
-        Math.max(0, projects.findIndex((p) => p.id === selectedProject?.id)) + 1,
+        Math.max(
+          0,
+          projects.findIndex((p) => p.id === selectedProject?.id),
+        ) + 1,
       );
 
   const projectSeconds = useMemo(() => {
-    const bucketKey = isGeneral
-      ? GENERAL_TIME_KEY
-      : (selectedProject?.id ?? GENERAL_TIME_KEY);
+    const bucketKey = isGeneral ? GENERAL_TIME_KEY : (selectedProject?.id ?? GENERAL_TIME_KEY);
     const saved = secondsByProject[bucketKey] ?? 0;
-    const trackingSelected =
-      isGeneral ? timer.projectId == null : selectedProject?.id === timer.projectId;
+    const trackingSelected = isGeneral
+      ? timer.projectId == null
+      : selectedProject?.id === timer.projectId;
     const live =
-      trackingSelected && (isRunning || isPaused)
-        ? Math.floor(timer.elapsedMs / 1000)
-        : 0;
+      trackingSelected && (isRunning || isPaused) ? Math.floor(timer.elapsedMs / 1000) : 0;
     return saved + live;
   }, [
     isGeneral,
@@ -174,8 +169,12 @@ export function TimerCard() {
     timer.projectId,
   ]);
 
-  const dateLabel = dayjs().format("dddd");
-  const dateShort = dayjs().format("MMM D");
+  // The headline clock tracks the selected project, not the whole day.
+  const projectDisplay = formatElapsed(projectSeconds * 1000);
+
+  // The day it is in the org's timezone — the day the data below covers.
+  const dateLabel = weekdayLabelInZone(orgTimezone);
+  const dateShort = monthDayLabelInZone(orgTimezone);
   const showProjectBadge = isRunning || isPaused || projectSeconds > 0;
 
   const resetCreateForm = () => {
@@ -250,10 +249,12 @@ export function TimerCard() {
               )}
             >
               {(() => {
-                const generalSelected = timer.projectId == null;
+                const generalSelected = selectedProjectId == null;
                 const generalSaved = secondsByProject[GENERAL_TIME_KEY] ?? 0;
+                // Live time belongs to the running session's project, which
+                // is not necessarily the one selected in the picker.
                 const generalLive =
-                  generalSelected && (isRunning || isPaused)
+                  timer.projectId == null && (isRunning || isPaused)
                     ? Math.floor(timer.elapsedMs / 1000)
                     : 0;
                 const generalTotal = generalSaved + generalLive;
@@ -281,10 +282,8 @@ export function TimerCard() {
                           : "bg-[#f5f5f5] px-1 py-0",
                       )}
                     >
-                      {generalShowDot && (
-                        <FigmaGlyph src="/figma/icon-dot.svg" size={12} />
-                      )}
-                      {formatProjectHhMm(generalTotal)}
+                      {generalShowDot && <FigmaGlyph src="/figma/icon-dot.svg" size={12} />}
+                      {formatElapsed(generalTotal * 1000)}
                     </span>
                   </DropdownMenuItem>
                 );
@@ -293,10 +292,12 @@ export function TimerCard() {
                 <p className="px-2 py-2 text-sm text-[#99a1af]">No projects yet</p>
               )}
               {projects.map((p, index) => {
-                const selected = p.id === timer.projectId;
+                const selected = p.id === selectedProjectId;
                 const saved = secondsByProject[p.id] ?? 0;
+                // Live time belongs to the running session's project, which
+                // is not necessarily the one selected in the picker.
                 const live =
-                  selected && (isRunning || isPaused)
+                  p.id === timer.projectId && (isRunning || isPaused)
                     ? Math.floor(timer.elapsedMs / 1000)
                     : 0;
                 const total = saved + live;
@@ -320,13 +321,11 @@ export function TimerCard() {
                     <span
                       className={cn(
                         "flex shrink-0 items-center rounded-md text-xs tabular-nums leading-4 text-[#1e2939]",
-                        selected && showDot
-                          ? "bg-white py-0 pl-px pr-1"
-                          : "bg-[#f5f5f5] px-1 py-0",
+                        selected && showDot ? "bg-white py-0 pl-px pr-1" : "bg-[#f5f5f5] px-1 py-0",
                       )}
                     >
                       {showDot && <FigmaGlyph src="/figma/icon-dot.svg" size={12} />}
-                      {formatProjectHhMm(total)}
+                      {formatElapsed(total * 1000)}
                     </span>
                   </DropdownMenuItem>
                 );
@@ -475,18 +474,18 @@ export function TimerCard() {
       </div>
 
       <div className="mt-8 flex flex-col items-center gap-4 pb-2">
-        <p className="text-[32px] font-medium leading-[34px] tracking-wide text-black tabular-nums">
-          {display}
+        <p className="text-[32px] font-medium tabular-nums leading-[34px] tracking-wide text-black">
+          {projectDisplay}
         </p>
-        {isIdle && todayLoggedMs > 0 && (
-          <p className="text-[11px] text-[#99a1af]">Today&apos;s total</p>
+        {isIdle && projectSeconds > 0 && (
+          <p className="text-[11px] text-[#99a1af]">Today · {displayName}</p>
         )}
 
         {isIdle && (
           <Button
             className="h-9 gap-1 rounded-lg bg-[#2b7fff] px-5 text-sm font-medium text-white hover:bg-[#1a6aef]"
             disabled={isSyncing}
-            onClick={() => void start(timer.projectId)}
+            onClick={() => void start(selectedProjectId)}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img

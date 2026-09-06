@@ -15,13 +15,9 @@ export function SummaryCard({ title, value, goal, expected }: SummaryCardProps) 
     <div className="overflow-hidden rounded-lg bg-[var(--surface-elevated)]">
       <div className="rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-3">
         <p className="text-xs text-[var(--text-subtle)]">{title}</p>
-        <div className="mt-0.5 flex items-end gap-0.5">
+        <div className="mt-0.5 flex flex-wrap items-end gap-x-0.5">
           <span className="text-base font-normal text-[#1e2939]">{value}</span>
-          {goal && (
-            <span className="pb-px text-xs text-[var(--text-muted)]">
-              / {goal}
-            </span>
-          )}
+          {goal && <span className="pb-px text-xs text-[var(--text-muted)]">/ {goal}</span>}
         </div>
       </div>
       {expected && (

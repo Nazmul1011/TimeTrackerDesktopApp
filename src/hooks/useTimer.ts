@@ -6,22 +6,19 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useOrgTimezone } from "@/hooks/useOrgTimezone";
 import { formatElapsed } from "@/lib/dayjs";
 import { dispatchTimerStopped, TIMER_STOPPED_EVENT } from "@/lib/timer-events";
 import { timerApi } from "@/services/api/timer.api";
 import { timesheetApi } from "@/services/api/timesheet.api";
 import { sanitizeProjectId } from "@/lib/project";
-import {
-  cancelWindowReveal,
-  scheduleWindowRevealAfterResume,
-} from "@/lib/window-reveal";
+import { cancelWindowReveal, scheduleWindowRevealAfterResume } from "@/lib/window-reveal";
 import { useAuthStore } from "@/store/auth.store";
 import { useTimerStore } from "@/store/timer.store";
 
 function getErrorMessage(err: unknown, fallback: string): string {
   if (typeof err === "object" && err !== null && "response" in err) {
-    const response = (err as { response?: { data?: { message?: string } } })
-      .response;
+    const response = (err as { response?: { data?: { message?: string } } }).response;
     if (response?.data?.message) return response.data.message;
   }
   if (err instanceof Error && err.message) return err.message;
@@ -32,8 +29,11 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
   const hydrateOnMount = options?.hydrateOnMount ?? false;
   const organizationId = useAuthStore((s) => s.organizationId);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  // Arrives with the org list, after the first render on a cold start.
+  const orgTimezone = useOrgTimezone();
 
   const timer = useTimerStore((s) => s.timer);
+  const selectedProjectId = useTimerStore((s) => s.selectedProjectId);
   const todayLoggedMs = useTimerStore((s) => s.todayLoggedMs);
   const isSyncing = useTimerStore((s) => s.isSyncing);
   const tick = useTimerStore((s) => s.tick);
@@ -54,23 +54,38 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
 
   const refreshTodayTotal = useCallback(async () => {
     if (!isAuthenticated || !organizationId) return;
+    const requestedOrg = organizationId;
     try {
-      const seconds = await timesheetApi.getTodayLoggedSeconds();
+      const seconds = await timesheetApi.getTodayLoggedSeconds(orgTimezone);
+      // A total for the org we just left must not land on the new one.
+      if (useAuthStore.getState().organizationId !== requestedOrg) return;
       setTodayLoggedSeconds(seconds);
     } catch {
       // keep previous total
     }
-  }, [isAuthenticated, organizationId, setTodayLoggedSeconds]);
+  }, [isAuthenticated, organizationId, orgTimezone, setTodayLoggedSeconds]);
 
   const refreshCurrent = useCallback(async () => {
     if (!isAuthenticated || !organizationId) return;
+    const requestedOrg = organizationId;
     try {
       const current = await timerApi.current();
+      if (useAuthStore.getState().organizationId !== requestedOrg) return;
       hydrateFromApi(current);
     } catch {
       // keep local state if sync fails
     }
   }, [hydrateFromApi, isAuthenticated, organizationId]);
+
+  // Timer session and today's total belong to a single org. Clear them on a
+  // switch so the refresh below re-hydrates from the new org instead of
+  // leaving the previous org's clock running.
+  const loadedOrgRef = useRef(organizationId);
+  useEffect(() => {
+    if (loadedOrgRef.current === organizationId) return;
+    loadedOrgRef.current = organizationId;
+    reset();
+  }, [organizationId, reset]);
 
   useEffect(() => {
     if (!isAuthenticated || !organizationId) return;
@@ -84,13 +99,14 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
     void refreshTodayTotal();
   }, [hydrateOnMount, refreshCurrent, refreshTodayTotal]);
 
-
   useEffect(() => {
     if (!isAuthenticated || !organizationId) return;
     missingTimerStreakRef.current = 0;
+    const requestedOrg = organizationId;
     const id = window.setInterval(async () => {
       try {
         const current = await timerApi.current();
+        if (useAuthStore.getState().organizationId !== requestedOrg) return;
         const status = useTimerStore.getState().timer.status;
         if (!current) {
           if (status === "idle") {
@@ -153,8 +169,8 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
       setSyncing(true);
       try {
         ensureToday();
-        const resolved =
-          projectId !== undefined ? projectId : timer.projectId;
+        // Default to whatever the picker shows, not the last session's project.
+        const resolved = projectId !== undefined ? projectId : selectedProjectId;
         // Keep picker in sync (e.g. timesheet Play / General)
         setProject(resolved ?? null);
         const apiTimer = await timerApi.start({
@@ -170,14 +186,7 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
         busyRef.current = false;
       }
     },
-    [
-      ensureToday,
-      hydrateFromApi,
-      setProject,
-      setSyncing,
-      timer.description,
-      timer.projectId,
-    ],
+    [ensureToday, hydrateFromApi, selectedProjectId, setProject, setSyncing, timer.description],
   );
 
   const pause = useCallback(async () => {
@@ -225,12 +234,8 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
         description: timer.description || undefined,
       });
       const rows = result?.entries ?? [];
-      const fromEntries = rows.reduce(
-        (sum, entry) => sum + (entry.duration ?? 0),
-        0,
-      );
-      const savedSeconds =
-        result?.totalDurationSeconds || fromEntries || sessionSeconds;
+      const fromEntries = rows.reduce((sum, entry) => sum + (entry.duration ?? 0), 0);
+      const savedSeconds = result?.totalDurationSeconds || fromEntries || sessionSeconds;
       const previousLogged = useTimerStore.getState().todayLoggedMs;
       setIdle();
       cancelWindowReveal();
@@ -268,6 +273,7 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
 
   return {
     timer,
+    selectedProjectId,
     display: formatElapsed(displayMs),
     displayMs,
     todayLoggedMs,

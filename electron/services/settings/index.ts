@@ -32,14 +32,14 @@ export function normalizeDesktopSettings(
   return {
     theme: isTheme(merged.theme) ? merged.theme : DEFAULT_DESKTOP_SETTINGS.theme,
     screenshotIntervalMinutes:
-      typeof merged.screenshotIntervalMinutes === "number" &&
-      merged.screenshotIntervalMinutes > 0
+      typeof merged.screenshotIntervalMinutes === "number" && merged.screenshotIntervalMinutes > 0
         ? merged.screenshotIntervalMinutes
         : DEFAULT_DESKTOP_SETTINGS.screenshotIntervalMinutes,
     idleTimeoutMinutes:
-      typeof merged.idleTimeoutMinutes === "number" &&
-      merged.idleTimeoutMinutes >= 0
-        ? merged.idleTimeoutMinutes
+      typeof merged.idleTimeoutMinutes === "number" && merged.idleTimeoutMinutes >= 0
+        ? merged.idleTimeoutMinutes === 0.5 || merged.idleTimeoutMinutes === 0.05
+          ? DEFAULT_DESKTOP_SETTINGS.idleTimeoutMinutes
+          : merged.idleTimeoutMinutes
         : DEFAULT_DESKTOP_SETTINGS.idleTimeoutMinutes,
     autoStartOnLogin: Boolean(merged.autoStartOnLogin),
     notificationsEnabled: merged.notificationsEnabled !== false,
@@ -57,9 +57,7 @@ export class SettingsService {
   }
 
   get(): DesktopSettings {
-    return normalizeDesktopSettings(
-      this.storage().getSettings() as Record<string, unknown>,
-    );
+    return normalizeDesktopSettings(this.storage().getSettings() as Record<string, unknown>);
   }
 
   set(partial: Partial<DesktopSettings>): {
@@ -120,10 +118,7 @@ export class SettingsService {
       log.info("[SettingsService] login item", actual);
       return { ok: true, openAtLogin: Boolean(actual.openAtLogin) };
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Could not update launch on login";
+      const message = error instanceof Error ? error.message : "Could not update launch on login";
       log.warn("[SettingsService] setLoginItemSettings failed", error);
       return { ok: false, openAtLogin: false, message };
     }

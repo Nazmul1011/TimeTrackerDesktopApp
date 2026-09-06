@@ -1,23 +1,29 @@
 /**
  * Timer Zustand store — session ticking + today's logged total.
  * Display = todayLoggedMs + session elapsed (while running/paused).
- * Resets today's total at local midnight.
+ * Resets today's total at midnight in the active org's timezone.
  */
 import { create } from "zustand";
 import type { ApiTimer } from "@/services/api/types";
-import { toIsoDate } from "@/services/api/timesheet.api";
+import { getOrgTimezone, todayInZone } from "@/lib/org-date";
 import { sanitizeProjectId } from "@/lib/project";
 import type { Timer, TimerStatus } from "@/types";
 
 interface TimerState {
   timer: Timer;
+  /**
+   * Project chosen in the picker. Distinct from `timer.projectId`, which is the
+   * project the live session is being logged against: the selection survives a
+   * stop, and changing it never re-attributes a running session.
+   */
+  selectedProjectId: string | null;
   /** Epoch ms when the current running segment began */
   segmentStartedAt: number | null;
   /** Elapsed ms accumulated before the current running segment */
   baseElapsedMs: number;
   /** Completed time entries for today (ms) — survives stop until day ends */
   todayLoggedMs: number;
-  /** Local calendar day for todayLoggedMs */
+  /** Org-timezone calendar day for todayLoggedMs */
   todayDate: string;
   isSyncing: boolean;
   setDescription: (description: string) => void;
@@ -59,8 +65,7 @@ function mapApiTimer(apiTimer: ApiTimer): {
   segmentStartedAt: number | null;
 } {
   const elapsedMs = Math.max(0, (apiTimer.elapsedSeconds ?? 0) * 1000);
-  const status: TimerStatus =
-    apiTimer.status === "paused" ? "paused" : "running";
+  const status: TimerStatus = apiTimer.status === "paused" ? "paused" : "running";
   return {
     timer: {
       id: apiTimer.id,
@@ -78,26 +83,27 @@ function mapApiTimer(apiTimer: ApiTimer): {
 
 export const useTimerStore = create<TimerState>((set, get) => ({
   timer: initialTimer,
+  selectedProjectId: null,
   segmentStartedAt: null,
   baseElapsedMs: 0,
   todayLoggedMs: 0,
-  todayDate: toIsoDate(),
+  todayDate: todayInZone(getOrgTimezone()),
   isSyncing: false,
 
-  setDescription: (description) =>
-    set((s) => ({ timer: { ...s.timer, description } })),
+  setDescription: (description) => set((s) => ({ timer: { ...s.timer, description } })),
 
   setProject: (projectId) => {
     const next =
-      projectId == null || projectId === ""
-        ? null
-        : sanitizeProjectId(projectId) ?? null;
-    set((s) => ({ timer: { ...s.timer, projectId: next } }));
+      projectId == null || projectId === "" ? null : (sanitizeProjectId(projectId) ?? null);
+    // Picker only. The running session keeps its own project, so switching
+    // here cannot move elapsed time onto a different project.
+    set({ selectedProjectId: next });
   },
 
   hydrateFromApi: (apiTimer) => {
     if (!apiTimer) {
-      // Idle — keep today's logged total, clear only the live session
+      // Idle — keep today's logged total and the picker selection, and clear
+      // only the live session.
       set({
         timer: { ...initialTimer, elapsedMs: 0 },
         segmentStartedAt: null,
@@ -106,7 +112,9 @@ export const useTimerStore = create<TimerState>((set, get) => ({
       return;
     }
     const mapped = mapApiTimer(apiTimer);
-    set(mapped);
+    // A timer running on the server wins the picker, so the UI shows what is
+    // actually being logged (app start, another device, remote sync).
+    set({ ...mapped, selectedProjectId: mapped.timer.projectId });
   },
 
   applyElapsedSeconds: (elapsedSeconds, status, partial) => {
@@ -139,12 +147,12 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     get().ensureToday();
     set({
       todayLoggedMs: Math.max(0, seconds) * 1000,
-      todayDate: toIsoDate(),
+      todayDate: todayInZone(getOrgTimezone()),
     });
   },
 
   ensureToday: () => {
-    const today = toIsoDate();
+    const today = todayInZone(getOrgTimezone());
     if (get().todayDate === today) return;
     set({ todayDate: today, todayLoggedMs: 0 });
   },
@@ -165,21 +173,26 @@ export const useTimerStore = create<TimerState>((set, get) => ({
 
   getDisplayMs: () => {
     const state = get();
-    state.ensureToday();
     const sessionMs =
       state.timer.status === "running" || state.timer.status === "paused"
         ? state.timer.elapsedMs
         : 0;
-    return state.todayLoggedMs + sessionMs;
+    // Must stay pure: this is read during render. The day rollover is applied
+    // by ensureToday() from the ticking effects, so a total carried over from
+    // a previous day is ignored here instead of being written away mid-render.
+    const dayTotal = state.todayDate === todayInZone(getOrgTimezone()) ? state.todayLoggedMs : 0;
+    return dayTotal + sessionMs;
   },
 
   reset: () =>
     set({
       timer: initialTimer,
+      // Projects are org-scoped, so a reset (org switch) clears the selection.
+      selectedProjectId: null,
       segmentStartedAt: null,
       baseElapsedMs: 0,
       todayLoggedMs: 0,
-      todayDate: toIsoDate(),
+      todayDate: todayInZone(getOrgTimezone()),
       isSyncing: false,
     }),
 }));

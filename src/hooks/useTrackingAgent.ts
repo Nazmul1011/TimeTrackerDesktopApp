@@ -36,6 +36,13 @@ const TOKEN_REFRESH_MS = 8 * 60_000;
 const CONFIG_POLL_MS = 30_000;
 
 export const SCREENSHOT_CAPTURED_EVENT = "gr8r:screenshot-captured";
+/** Fired after a successful activity upload so Top Apps can refetch. */
+export const ACTIVITY_FLUSHED_EVENT = "gr8r:activity-flushed";
+
+function dispatchActivityFlushed() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(ACTIVITY_FLUSHED_EVENT));
+}
 
 function resolveScreenshotIntervalMs(cfg: MonitoringConfig | null): number {
   const minutes = Number(cfg?.screenshotInterval);
@@ -45,10 +52,7 @@ function resolveScreenshotIntervalMs(cfg: MonitoringConfig | null): number {
 }
 
 function screenshotsAllowed(cfg: MonitoringConfig | null): boolean {
-  return (
-    process.env.NEXT_PUBLIC_ENABLE_SCREENSHOTS !== "false" &&
-    cfg?.screenshotEnabled !== false
-  );
+  return process.env.NEXT_PUBLIC_ENABLE_SCREENSHOTS !== "false" && cfg?.screenshotEnabled !== false;
 }
 
 export function useTrackingAgent() {
@@ -56,9 +60,7 @@ export function useTrackingAgent() {
   const organizationId = useAuthStore((s) => s.organizationId);
   const tokens = useAuthStore((s) => s.tokens);
   const timerStatus = useTimerStore((s) => s.timer.status);
-  const idleTimeoutMinutes = useSettingsStore(
-    (s) => s.settings.idleTimeoutMinutes,
-  );
+  const idleTimeoutMinutes = useSettingsStore((s) => s.settings.idleTimeoutMinutes);
 
   const queueRef = useRef<Sample[]>([]);
   const lastSampleRef = useRef<{
@@ -119,15 +121,11 @@ export function useTrackingAgent() {
     const pushAuthToMain = (accessToken?: string | null) => {
       const state = useAuthStore.getState();
       const token =
-        accessToken ||
-        state.tokens.accessToken ||
-        localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+        accessToken || state.tokens.accessToken || localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
       if (!token) return;
       void api.tracking.updateAuth({
         accessToken: token,
-        refreshToken:
-          state.tokens.refreshToken ||
-          localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN),
+        refreshToken: state.tokens.refreshToken || localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN),
         organizationId: state.organizationId ?? undefined,
         deviceId: ensureDeviceId(),
         sessionToken: state.tokens.sessionToken,
@@ -164,8 +162,7 @@ export function useTrackingAgent() {
     });
 
     const onAxiosRefresh = (event: Event) => {
-      const accessToken = (event as CustomEvent<{ accessToken?: string }>).detail
-        ?.accessToken;
+      const accessToken = (event as CustomEvent<{ accessToken?: string }>).detail?.accessToken;
       if (accessToken) applyAccessToken(accessToken);
     };
     window.addEventListener("auth:token-refreshed", onAxiosRefresh);
@@ -194,13 +191,8 @@ export function useTrackingAgent() {
     let cancelled = false;
 
     const unsubUploaded = api.tracking.onUploaded((payload) => {
-      window.dispatchEvent(
-        new CustomEvent(SCREENSHOT_CAPTURED_EVENT, { detail: payload }),
-      );
-      if (
-        process.env.NEXT_PUBLIC_APP_ENV !== "production" &&
-        !firstUploadToastRef.current
-      ) {
+      window.dispatchEvent(new CustomEvent(SCREENSHOT_CAPTURED_EVENT, { detail: payload }));
+      if (process.env.NEXT_PUBLIC_APP_ENV !== "production" && !firstUploadToastRef.current) {
         firstUploadToastRef.current = true;
         notifyToast("success", "Screenshots are being captured");
       }
@@ -211,8 +203,7 @@ export function useTrackingAgent() {
       if (process.env.NEXT_PUBLIC_APP_ENV !== "production") {
         notifyToast(
           "error",
-          payload?.message ||
-            "Screenshot failed — check screen capture permissions",
+          payload?.message || "Screenshot failed — check screen capture permissions",
         );
       }
     });
@@ -234,18 +225,14 @@ export function useTrackingAgent() {
 
     const startTracking = (cfg: MonitoringConfig | null) => {
       const state = useAuthStore.getState();
-      const token =
-        state.tokens.accessToken ||
-        localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+      const token = state.tokens.accessToken || localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
       if (!token) return;
 
       const intervalMs = resolveScreenshotIntervalMs(cfg);
       const idleMinutes = useSettingsStore.getState().settings.idleTimeoutMinutes;
       void api.tracking.start({
         accessToken: token,
-        refreshToken:
-          state.tokens.refreshToken ||
-          localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN),
+        refreshToken: state.tokens.refreshToken || localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN),
         organizationId: state.organizationId || organizationId,
         deviceId: ensureDeviceId(),
         sessionToken: state.tokens.sessionToken,
@@ -253,8 +240,7 @@ export function useTrackingAgent() {
         screenshotIntervalMs: intervalMs,
         enableScreenshots: screenshotsAllowed(cfg),
         firstScreenshotDelayMs: FIRST_SCREENSHOT_MS,
-        idleTimeoutMs:
-          idleMinutes > 0 ? Math.max(30_000, idleMinutes * 60_000) : 0,
+        idleTimeoutMs: idleMinutes > 0 ? Math.max(30_000, idleMinutes * 60_000) : 0,
       });
     };
 
@@ -286,10 +272,8 @@ export function useTrackingAgent() {
           if (cancelled) return;
           const prev = configRef.current;
           const intervalChanged =
-            resolveScreenshotIntervalMs(prev) !==
-            resolveScreenshotIntervalMs(cfg);
-          const enabledChanged =
-            screenshotsAllowed(prev) !== screenshotsAllowed(cfg);
+            resolveScreenshotIntervalMs(prev) !== resolveScreenshotIntervalMs(cfg);
+          const enabledChanged = screenshotsAllowed(prev) !== screenshotsAllowed(cfg);
           configRef.current = cfg;
           if (intervalChanged || enabledChanged) {
             startTracking(cfg);
@@ -308,12 +292,7 @@ export function useTrackingAgent() {
       unsubIdle?.();
       void api.tracking.stop();
     };
-  }, [
-    isAuthenticated,
-    organizationId,
-    timerStatus,
-    idleTimeoutMinutes,
-  ]);
+  }, [isAuthenticated, organizationId, timerStatus, idleTimeoutMinutes]);
 
   // Activity sampling + heartbeat (renderer)
   useEffect(() => {
@@ -323,20 +302,36 @@ export function useTrackingAgent() {
     const api = getElectronAPI();
     if (!api) return;
 
-    const enableActivity =
-      process.env.NEXT_PUBLIC_ENABLE_ACTIVITY_TRACKING !== "false";
+    const enableActivity = process.env.NEXT_PUBLIC_ENABLE_ACTIVITY_TRACKING !== "false";
 
     let cancelled = false;
+    let flushInFlight: Promise<void> | null = null;
+    // Immediate flush only for the first real sample and each newly focused app.
+    // Same-app ticks keep using the 30s interval so we don't upload every 10s.
+    let flushedFirstReal = false;
+    let lastImmediateApp: string | null = null;
     void api.activity.start();
 
-    const flush = async () => {
-      const batch = queueRef.current.splice(0, queueRef.current.length);
-      if (!batch.length) return;
-      try {
-        await activityApi.bulk(batch);
-      } catch {
-        queueRef.current = [...batch, ...queueRef.current].slice(0, 200);
-      }
+    const flush = () => {
+      if (flushInFlight) return flushInFlight;
+      flushInFlight = (async () => {
+        const batch = queueRef.current.splice(0, queueRef.current.length);
+        if (!batch.length) return;
+        const orgAtStart = useAuthStore.getState().organizationId;
+        try {
+          await activityApi.bulk(batch);
+          if (cancelled) return;
+          if (useAuthStore.getState().organizationId !== orgAtStart) return;
+          if (batch.some((sample) => !sample.isIdle)) {
+            dispatchActivityFlushed();
+          }
+        } catch {
+          queueRef.current = [...batch, ...queueRef.current].slice(0, 200);
+        }
+      })().finally(() => {
+        flushInFlight = null;
+      });
+      return flushInFlight;
     };
 
     const sample = async () => {
@@ -356,16 +351,29 @@ export function useTrackingAgent() {
         const now = Date.now();
         const prev = lastSampleRef.current;
 
+        // Warm OS icon cache for Top Apps while tracking
+        if (win.appName && api.activity.getAppIcon) {
+          void api.activity.getAppIcon(normalizeAppName(win.appName));
+          void api.activity.getAppIcon(win.appName);
+        }
+
         if (prev) {
           const durationSec = Math.max(1, Math.round((now - prev.at) / 1000));
+          const appName = normalizeAppName(prev.appName);
           queueRef.current.push({
             timestamp: new Date(prev.at).toISOString(),
-            appName: normalizeAppName(prev.appName),
+            appName,
             windowTitle: prev.windowTitle || undefined,
             duration: durationSec,
             isIdle: prev.isIdle,
             deviceId: ensureDeviceId(),
           });
+          const isNewApp = lastImmediateApp !== appName;
+          if (!prev.isIdle && (!flushedFirstReal || isNewApp)) {
+            flushedFirstReal = true;
+            lastImmediateApp = appName;
+            void flush();
+          }
         }
 
         lastSampleRef.current = {

@@ -93,10 +93,7 @@ export class TrackingService {
     this.stopTimersOnly();
     this.updateAuth(auth);
     this.options = {
-      screenshotIntervalMs: Math.max(
-        60_000,
-        options?.screenshotIntervalMs ?? 5 * 60_000,
-      ),
+      screenshotIntervalMs: Math.max(60_000, options?.screenshotIntervalMs ?? 5 * 60_000),
       enableScreenshots: options?.enableScreenshots !== false,
       firstScreenshotDelayMs: options?.firstScreenshotDelayMs ?? 3_000,
       idleTimeoutMs:
@@ -146,10 +143,7 @@ export class TrackingService {
 
     if (this.scheduleRevealOnNextStart) {
       this.scheduleRevealOnNextStart = false;
-      const revealMs = Math.max(
-        60_000,
-        this.options.idleTimeoutMs ?? 5 * 60_000,
-      );
+      const revealMs = Math.max(60_000, this.options.idleTimeoutMs ?? 5 * 60_000);
       WindowRevealService.getInstance().scheduleAfterResume(revealMs);
       log.info(
         `[TrackingService] window reveal scheduled after idle resume (${Math.round(revealMs / 1000)}s)`,
@@ -239,8 +233,7 @@ export class TrackingService {
       this.emitToRenderer("screenshot:uploaded", uploaded);
       return uploaded;
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Screenshot upload failed";
+      const message = error instanceof Error ? error.message : "Screenshot upload failed";
       log.error("[TrackingService] captureAndUpload error", error);
       this.emitToRenderer("screenshot:failed", { message });
       return { ok: false, message };
@@ -297,8 +290,7 @@ export class TrackingService {
     } | null;
 
     if (!response.ok || !json?.success) {
-      const message =
-        json?.message || `Upload failed with status ${response.status}`;
+      const message = json?.message || `Upload failed with status ${response.status}`;
       log.warn(`[TrackingService] upload failed: ${message}`);
       return { ok: false, message };
     }
@@ -408,12 +400,7 @@ export class TrackingService {
       }, 12_000);
       const onDone = (ok: boolean) => {
         clearTimeout(timer);
-        resolve(
-          ok &&
-            Boolean(
-              this.auth?.accessToken && this.auth.accessToken !== previous,
-            ),
-        );
+        resolve(ok && Boolean(this.auth?.accessToken && this.auth.accessToken !== previous));
       };
       this.authWaiters.push(onDone);
     });
@@ -424,9 +411,7 @@ export class TrackingService {
     this.idlePauseInFlight = true;
     this.stopTimersOnly();
 
-    log.info(
-      `[TrackingService] idle for one screenshot interval — pausing timer`,
-    );
+    log.info(`[TrackingService] idle for one screenshot interval — pausing timer`);
 
     if (this.options.enableScreenshots) {
       const started = Date.now();
@@ -438,12 +423,9 @@ export class TrackingService {
       }
     }
 
-    const idleMs =
-      this.options.idleTimeoutMs ?? this.options.screenshotIntervalMs;
-    const idleMinutes = Math.max(1, Math.round(idleMs / 60_000));
+    const idleMs = this.options.idleTimeoutMs ?? this.options.screenshotIntervalMs;
 
-    const notifyResult =
-      NotificationService.getInstance().showTimerIdlePaused(idleMinutes);
+    const notifyResult = NotificationService.getInstance().showTimerIdlePaused(idleMs);
     if (!notifyResult.ok) {
       log.warn("[TrackingService] idle notification failed", notifyResult.message);
     }

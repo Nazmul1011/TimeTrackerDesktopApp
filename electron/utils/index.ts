@@ -26,11 +26,13 @@ export function resolveAppIconPaths(): string[] {
     ];
   }
   if (process.platform === "darwin") {
+    // PNG first: nativeImage / dock.setIcon often fail to decode .icns.
+    // icon.icns stays for electron-builder packaging only.
     return [
-      path.join(root, "icons", "icon.icns"),
       path.join(root, "icons", "icon.png"),
       path.join(root, "icons", "256x256.png"),
       path.join(root, "tray", "tray-icon.png"),
+      path.join(root, "icons", "icon.icns"),
     ];
   }
   return [

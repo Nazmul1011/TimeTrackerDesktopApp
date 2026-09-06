@@ -6,13 +6,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { TimesheetRow } from "@/components/timesheet/timesheet-row";
+import { useOrgTimezone } from "@/hooks/useOrgTimezone";
 import { useTimer } from "@/hooks/useTimer";
 import { formatTimesheetDuration } from "@/lib/project-icons";
 import { TIMER_STOPPED_EVENT } from "@/lib/timer-events";
-import {
-  timesheetApi,
-  type ApiTimeEntry,
-} from "@/services/api/timesheet.api";
+import { timesheetApi, type ApiTimeEntry } from "@/services/api/timesheet.api";
 import { useAuthStore } from "@/store/auth.store";
 
 function entryTitle(entry: ApiTimeEntry): string {
@@ -21,7 +19,9 @@ function entryTitle(entry: ApiTimeEntry): string {
 
 export function TimesheetTab() {
   const organizationId = useAuthStore((s) => s.organizationId);
-  const { timer, start, isRunning, isPaused, stop } = useTimer();
+  // Arrives with the org list, after the first render on a cold start.
+  const orgTimezone = useOrgTimezone();
+  const { timer, start, pause, resume, isRunning, isPaused, stop } = useTimer();
   const [entries, setEntries] = useState<ApiTimeEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -31,20 +31,29 @@ export function TimesheetTab() {
       setLoading(false);
       return;
     }
+    // A reply for the org we just left must never overwrite the current one.
+    const requestedOrg = organizationId;
+    const isStale = () => useAuthStore.getState().organizationId !== requestedOrg;
+
     setLoading(true);
     try {
-      const rows = await timesheetApi.listToday();
+      const rows = await timesheetApi.listToday(orgTimezone);
+      if (isStale()) return;
       setEntries(
-        rows.sort(
-          (a, b) =>
-            new Date(b.startTime).getTime() - new Date(a.startTime).getTime(),
-        ),
+        rows.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()),
       );
     } catch {
+      if (isStale()) return;
       setEntries([]);
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
+  }, [organizationId, orgTimezone]);
+
+  // Drop the previous org's entries immediately rather than showing them
+  // until the new org's request lands.
+  useEffect(() => {
+    setEntries([]);
   }, [organizationId]);
 
   useEffect(() => {
@@ -59,8 +68,17 @@ export function TimesheetTab() {
     return () => window.removeEventListener(TIMER_STOPPED_EVENT, handler);
   }, [reload]);
 
-  const handlePlay = (projectId: string | null) => {
-    if (isRunning) void stop();
+  const handleRowControl = (projectId: string | null) => {
+    const sameProject = (timer.projectId ?? null) === projectId;
+    if (sameProject && isRunning) {
+      void pause();
+      return;
+    }
+    if (sameProject && isPaused) {
+      void resume();
+      return;
+    }
+    if (isRunning || isPaused) void stop();
     void start(projectId);
   };
 
@@ -89,18 +107,38 @@ export function TimesheetTab() {
     }
   };
 
-  const activeProjectId = isRunning || isPaused ? timer.projectId : null;
+  const latestIdByProject = useMemo(() => {
+    const seen = new Set<string>();
+    const latest = new Set<string>();
+    for (const entry of entries) {
+      const key = entry.projectId ?? "general";
+      if (seen.has(key)) continue;
+      seen.add(key);
+      latest.add(entry.id);
+    }
+    return latest;
+  }, [entries]);
+
+  const liveProjectKey = isRunning || isPaused ? (timer.projectId ?? "general") : null;
 
   const rows = useMemo(
     () =>
-      entries.map((entry) => ({
-        entry,
-        title: entryTitle(entry),
-        projectLabel: entry.project?.name ?? "General",
-        duration: formatTimesheetDuration(entry.duration ?? 0),
-        isActive: entry.projectId === activeProjectId && (isRunning || isPaused),
-      })),
-    [activeProjectId, entries, isPaused, isRunning],
+      entries.map((entry) => {
+        const isLatest = latestIdByProject.has(entry.id);
+        const sameLiveProject =
+          liveProjectKey !== null && (entry.projectId ?? "general") === liveProjectKey;
+        return {
+          entry,
+          title: entryTitle(entry),
+          projectLabel: entry.project?.name ?? "General",
+          duration: formatTimesheetDuration(entry.duration ?? 0),
+          isActive: isLatest && sameLiveProject,
+          playEnabled: isLatest,
+          playState:
+            isLatest && sameLiveProject && isRunning ? ("running" as const) : ("paused" as const),
+        };
+      }),
+    [entries, isRunning, latestIdByProject, liveProjectKey],
   );
 
   if (loading) {
@@ -121,21 +159,25 @@ export function TimesheetTab() {
 
   return (
     <div className="max-h-[min(280px,calc(100vh-340px))] overflow-y-auto overflow-x-hidden rounded-xl border border-[#ededed] bg-white">
-      {rows.map(({ entry, title, projectLabel, duration, isActive }, index) => (
-        <TimesheetRow
-          key={entry.id}
-          entry={entry}
-          title={title}
-          projectLabel={projectLabel}
-          duration={duration}
-          isActive={isActive}
-          showMenu={!isActive}
-          compact={index === 0}
-          onPlay={() => handlePlay(entry.projectId ?? null)}
-          onSave={(payload) => handleSaveEdit(entry, payload)}
-          onDelete={() => handleDelete(entry)}
-        />
-      ))}
+      {rows.map(
+        ({ entry, title, projectLabel, duration, isActive, playState, playEnabled }, index) => (
+          <TimesheetRow
+            key={entry.id}
+            entry={entry}
+            title={title}
+            projectLabel={projectLabel}
+            duration={duration}
+            isActive={isActive}
+            playState={playState}
+            playEnabled={playEnabled}
+            showMenu={!isActive}
+            compact={index === 0}
+            onPlay={() => handleRowControl(entry.projectId ?? null)}
+            onSave={(payload) => handleSaveEdit(entry, payload)}
+            onDelete={() => handleDelete(entry)}
+          />
+        ),
+      )}
     </div>
   );
 }

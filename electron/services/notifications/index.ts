@@ -10,11 +10,7 @@ import { app, nativeImage, Notification } from "electron";
 import log from "electron-log/main";
 import { SettingsService } from "../settings";
 import { WindowRevealService } from "../window-reveal";
-import {
-  findExistingPath,
-  getResourcesRoot,
-  resolveAppIconPaths,
-} from "../../utils";
+import { findExistingPath, getResourcesRoot, resolveAppIconPaths } from "../../utils";
 
 const execFileAsync = promisify(execFile);
 
@@ -31,13 +27,18 @@ export class NotificationService {
     return NotificationService.instance;
   }
 
-  /** Desktop alert when idle auto-pause stops the timer. */
-  showTimerIdlePaused(idleMinutes: number): { ok: boolean; message?: string } {
-    const minutes = Math.max(1, Math.round(idleMinutes));
-    const minuteLabel = minutes === 1 ? "minute" : "minutes";
+  /** Desktop alert when idle auto-pause pauses the timer. */
+  showTimerIdlePaused(idleMs: number): { ok: boolean; message?: string } {
+    const seconds = Math.max(1, Math.round(idleMs / 1000));
+    const duration =
+      seconds < 60
+        ? `${seconds} seconds`
+        : `${Math.max(1, Math.round(seconds / 60))} ${
+            Math.round(seconds / 60) === 1 ? "minute" : "minutes"
+          }`;
     return this.show(
       "Timer paused",
-      `No mouse or keyboard activity for ${minutes} ${minuteLabel}. Your timer has been paused.`,
+      `No mouse or keyboard activity for ${duration}. Your timer has been paused.`,
       { urgency: "critical" },
     );
   }
@@ -48,9 +49,7 @@ export class NotificationService {
     options?: { urgency?: "normal" | "critical" | "low" },
   ): { ok: boolean; message?: string } {
     if (!SettingsService.getInstance().notificationsEnabled()) {
-      log.info(
-        "[NotificationService] skipped — notifications disabled in settings",
-      );
+      log.info("[NotificationService] skipped — notifications disabled in settings");
       return { ok: false, message: "Notifications disabled in settings" };
     }
 
@@ -97,9 +96,7 @@ export class NotificationService {
         body,
         silent: false,
         ...(icon ? { icon } : {}),
-        ...(process.platform === "linux" && options?.urgency
-          ? { urgency: options.urgency }
-          : {}),
+        ...(process.platform === "linux" && options?.urgency ? { urgency: options.urgency } : {}),
       });
 
       this.active.push(notification);
@@ -139,8 +136,7 @@ export class NotificationService {
       log.warn("[NotificationService] showElectron failed", error);
       return {
         ok: false,
-        message:
-          error instanceof Error ? error.message : "Failed to show notification",
+        message: error instanceof Error ? error.message : "Failed to show notification",
       };
     }
   }
@@ -167,13 +163,9 @@ export class NotificationService {
   /**
    * macOS Notification Center via AppleScript (fallback when Electron toast fails).
    */
-  private async showMacOsascriptFallback(
-    title: string,
-    body: string,
-  ): Promise<boolean> {
+  private async showMacOsascriptFallback(title: string, body: string): Promise<boolean> {
     try {
-      const escapeAs = (value: string) =>
-        value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      const escapeAs = (value: string) => value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
       const script = `display notification "${escapeAs(body)}" with title "${escapeAs(title)}" sound name "Glass"`;
       await execFileAsync("osascript", ["-e", script], { timeout: 3000 });
       try {
@@ -193,10 +185,7 @@ export class NotificationService {
    * Windows toast via PowerShell WinRT APIs (fallback when Electron toast fails).
    * Requires AppUserModelId set on the process (see main/index.ts).
    */
-  private async showWindowsToastFallback(
-    title: string,
-    body: string,
-  ): Promise<boolean> {
+  private async showWindowsToastFallback(title: string, body: string): Promise<boolean> {
     try {
       const escapeXml = (value: string) =>
         value
@@ -229,14 +218,7 @@ $notifier.Show($toast)
 
       await execFileAsync(
         "powershell.exe",
-        [
-          "-NoProfile",
-          "-NonInteractive",
-          "-ExecutionPolicy",
-          "Bypass",
-          "-Command",
-          ps,
-        ],
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", ps],
         { timeout: 5000, windowsHide: true },
       );
       log.info("[NotificationService] shown via Windows toast fallback", {

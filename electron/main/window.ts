@@ -35,7 +35,8 @@ export function createMainWindow(): BrowserWindow {
     title: "Gr8r Time Tracker",
     backgroundColor: "#f9fafb",
     autoHideMenuBar: true,
-    ...(icon && !icon.isEmpty() ? { icon } : {}),
+    // On macOS the window icon is flattened onto white and replaces dock.setIcon.
+    ...(process.platform !== "darwin" && icon && !icon.isEmpty() ? { icon } : {}),
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,

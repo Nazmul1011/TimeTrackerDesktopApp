@@ -13,6 +13,8 @@ const execFileAsync = promisify(execFile);
 export type ActiveWindowInfo = {
   appName: string;
   windowTitle: string;
+  /** macOS .app path or Windows exe path when known */
+  bundlePath?: string;
 };
 
 export class ActivityService {
@@ -72,19 +74,15 @@ export class ActivityService {
         timeout: 1500,
       });
       const windowId = idOut.trim();
-      const { stdout: nameOut } = await execFileAsync(
-        "xdotool",
-        ["getwindowname", windowId],
-        { timeout: 1500 },
-      );
+      const { stdout: nameOut } = await execFileAsync("xdotool", ["getwindowname", windowId], {
+        timeout: 1500,
+      });
       const title = nameOut.trim() || "Unknown";
       let appName = title.split(" — ").pop()?.split(" - ").pop()?.trim() || title;
       try {
-        const { stdout: classOut } = await execFileAsync(
-          "xprop",
-          ["-id", windowId, "WM_CLASS"],
-          { timeout: 1500 },
-        );
+        const { stdout: classOut } = await execFileAsync("xprop", ["-id", windowId, "WM_CLASS"], {
+          timeout: 1500,
+        });
         const match = classOut.match(/"([^"]+)"\s*,\s*"([^"]+)"/);
         if (match?.[1]) appName = match[1];
         else if (match?.[2]) appName = match[2];
@@ -98,32 +96,29 @@ export class ActivityService {
   }
 
   private async getMacActiveWindow(): Promise<ActiveWindowInfo> {
-    // Fast path: NSWorkspace app name (no Accessibility required).
-    const nsWorkspace = await this.getMacAppNameViaNSWorkspace();
+    // Fast path: NSWorkspace app name + bundle path (no Accessibility required).
+    const nsWorkspace = await this.getMacFrontmostApp();
 
-    const jxaPath = path.join(
-      getResourcesRoot(),
-      "scripts",
-      "get-active-window.jxa",
-    );
-    const scptPath = path.join(
-      getResourcesRoot(),
-      "scripts",
-      "get-active-window.applescript",
-    );
+    const jxaPath = path.join(getResourcesRoot(), "scripts", "get-active-window.jxa");
+    const scptPath = path.join(getResourcesRoot(), "scripts", "get-active-window.applescript");
 
     try {
-      const { stdout } = await execFileAsync(
-        "osascript",
-        ["-l", "JavaScript", jxaPath],
-        { timeout: 2500 },
-      );
+      const { stdout } = await execFileAsync("osascript", ["-l", "JavaScript", jxaPath], {
+        timeout: 2500,
+      });
       const parsed = this.parseMacWindowOutput(stdout);
       if (parsed.appName && parsed.appName !== "Desktop") {
-        return parsed;
+        return {
+          ...parsed,
+          bundlePath: nsWorkspace?.bundlePath,
+        };
       }
-      if (nsWorkspace) {
-        return { appName: nsWorkspace, windowTitle: parsed.windowTitle || "" };
+      if (nsWorkspace?.appName) {
+        return {
+          appName: nsWorkspace.appName,
+          windowTitle: parsed.windowTitle || "",
+          bundlePath: nsWorkspace.bundlePath,
+        };
       }
       return parsed;
     } catch (error) {
@@ -135,17 +130,27 @@ export class ActivityService {
         timeout: 2500,
       });
       const parsed = this.parseMacWindowOutput(stdout);
-      if (parsed.appName && parsed.appName !== "Desktop") return parsed;
-      if (nsWorkspace) {
-        return { appName: nsWorkspace, windowTitle: parsed.windowTitle || "" };
+      if (parsed.appName && parsed.appName !== "Desktop") {
+        return { ...parsed, bundlePath: nsWorkspace?.bundlePath };
+      }
+      if (nsWorkspace?.appName) {
+        return {
+          appName: nsWorkspace.appName,
+          windowTitle: parsed.windowTitle || "",
+          bundlePath: nsWorkspace.bundlePath,
+        };
       }
       return parsed;
     } catch (error) {
       log.debug("[ActivityService] AppleScript active window failed", error);
     }
 
-    if (nsWorkspace) {
-      return { appName: nsWorkspace, windowTitle: "" };
+    if (nsWorkspace?.appName) {
+      return {
+        appName: nsWorkspace.appName,
+        windowTitle: "",
+        bundlePath: nsWorkspace.bundlePath,
+      };
     }
 
     log.warn(
@@ -154,7 +159,10 @@ export class ActivityService {
     return { appName: "Desktop", windowTitle: "" };
   }
 
-  private async getMacAppNameViaNSWorkspace(): Promise<string | null> {
+  private async getMacFrontmostApp(): Promise<{
+    appName: string;
+    bundlePath?: string;
+  } | null> {
     try {
       const { stdout } = await execFileAsync(
         "osascript",
@@ -162,12 +170,19 @@ export class ActivityService {
           "-l",
           "JavaScript",
           "-e",
-          'ObjC.import("AppKit"); var a=$.NSWorkspace.sharedWorkspace.frontmostApplication; var n=ObjC.unwrap(a.localizedName); var b=ObjC.unwrap(a.bundleIdentifier); (n&&String(n))||(b&&String(b))||""',
+          'ObjC.import("AppKit"); var a=$.NSWorkspace.sharedWorkspace.frontmostApplication; var n=ObjC.unwrap(a.localizedName); var b=ObjC.unwrap(a.bundleIdentifier); var p=a.bundleURL?ObjC.unwrap(a.bundleURL.path):""; var name=(n&&String(n))||(b&&String(b))||""; name+"\\u001e"+String(p||"");',
         ],
         { timeout: 2000 },
       );
-      const name = stdout.trim();
-      return name.length > 0 ? name : null;
+      const line = stdout.trim();
+      const sep = line.indexOf("\u001e");
+      if (sep < 0) {
+        return line ? { appName: line } : null;
+      }
+      const appName = line.slice(0, sep).trim();
+      const bundlePath = line.slice(sep + 1).trim() || undefined;
+      if (!appName) return null;
+      return { appName, bundlePath };
     } catch {
       return null;
     }
@@ -178,8 +193,7 @@ export class ActivityService {
       stdout
         .split(/\r?\n/)
         .map((s) => s.trim())
-        .find((s) => s.includes("\u001e") || s.includes("|||")) ??
-      stdout.trim();
+        .find((s) => s.includes("\u001e") || s.includes("|||")) ?? stdout.trim();
 
     if (line.includes("\u001e")) {
       const sep = line.indexOf("\u001e");
@@ -200,22 +214,11 @@ export class ActivityService {
    * Uses a shipped PowerShell script for reliability on Windows.
    */
   private async getWindowsActiveWindow(): Promise<ActiveWindowInfo> {
-    const scriptPath = path.join(
-      getResourcesRoot(),
-      "scripts",
-      "get-active-window.ps1",
-    );
+    const scriptPath = path.join(getResourcesRoot(), "scripts", "get-active-window.ps1");
 
     const { stdout } = await execFileAsync(
       "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        scriptPath,
-      ],
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
       {
         timeout: 4000,
         windowsHide: true,

@@ -19,12 +19,17 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Gr8r Time Tracker",
   description: "Time Tracker + HRM Desktop Client",
+  icons: {
+    icon: "/app-icon.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${dmSans.variable} ${jetbrainsMono.variable} min-h-screen font-sans antialiased`}>
+      <body
+        className={`${dmSans.variable} ${jetbrainsMono.variable} min-h-screen font-sans antialiased`}
+      >
         <AppProviders>{children}</AppProviders>
       </body>
     </html>
