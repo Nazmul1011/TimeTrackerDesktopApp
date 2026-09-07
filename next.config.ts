@@ -2,15 +2,15 @@ import type { NextConfig } from "next";
 
 /**
  * Next.js configuration for the Electron renderer process.
- * output: 'export' is avoided so App Router API routes remain available later.
- * In Electron production builds, the app is served from the Next standalone/static output.
+ * Static export is required so packaged Electron can serve the UI without a Node Next server.
  */
 const nextConfig: NextConfig = {
+  output: "export",
   reactStrictMode: true,
   images: {
     unoptimized: true,
   },
-  // Allow absolute imports via tsconfig paths
+  trailingSlash: true,
   experimental: {},
 };
 

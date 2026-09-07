@@ -13,6 +13,7 @@ import { createTray } from "./tray";
 import { createAppMenu } from "./menu";
 import { initAutoUpdater } from "./updater";
 import { applySecurityDefaults } from "./security";
+import { startRendererServer, stopRendererServer } from "./renderer-server";
 import { registerIpcHandlers } from "../ipc";
 import { initDatabase } from "../database/sqlite";
 import { SettingsService } from "../services/settings";
@@ -23,6 +24,10 @@ log.transports.file.level = "info";
 log.info("[main] Starting Gr8r Time Tracker desktop client");
 
 if (process.platform === "linux") {
+  // Packaged Linux builds usually lack a setuid chrome-sandbox; without this
+  // the process exits immediately when launched from the desktop menu.
+  app.commandLine.appendSwitch("no-sandbox");
+  app.commandLine.appendSwitch("disable-gpu-sandbox");
   app.commandLine.appendSwitch(
     "enable-features",
     "WebRTCPipeWireCapturer,AllowSystemNotifications",
@@ -53,6 +58,11 @@ let mainWindow: BrowserWindow | null = null;
 
 async function bootstrap(): Promise<void> {
   applySecurityDefaults();
+
+  if (app.isPackaged) {
+    await startRendererServer();
+  }
+
   initDatabase();
   registerIpcHandlers();
   SettingsService.getInstance().applyStoredLoginItem();
@@ -64,7 +74,10 @@ async function bootstrap(): Promise<void> {
 }
 
 app.whenReady().then(() => {
-  void bootstrap();
+  void bootstrap().catch((err) => {
+    log.error("[main] Bootstrap failed", err);
+    app.quit();
+  });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -80,6 +93,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  stopRendererServer();
   log.info("[main] Application quitting");
 });
 

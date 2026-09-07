@@ -5,15 +5,29 @@
 import { app, session } from "electron";
 import log from "electron-log/main";
 
+function isAllowedRendererOrigin(origin: string): boolean {
+  const configured = process.env.ELECTRON_RENDERER_URL || "http://localhost:3000";
+  try {
+    if (origin === new URL(configured).origin) return true;
+  } catch {
+    // ignore bad configured URL
+  }
+  // Packaged local static server + Next dev defaults
+  return (
+    origin === "http://127.0.0.1:3000" ||
+    origin === "http://localhost:3000" ||
+    /^http:\/\/127\.0\.0\.1:\d+$/.test(origin)
+  );
+}
+
 export function applySecurityDefaults(): void {
   // Disable navigation to unexpected origins from the renderer
   app.on("web-contents-created", (_event, contents) => {
     contents.on("will-navigate", (event, navigationUrl) => {
-      const allowed = process.env.ELECTRON_RENDERER_URL || "http://localhost:3000";
       try {
         const parsed = new URL(navigationUrl);
-        const allowedOrigin = new URL(allowed).origin;
-        if (parsed.origin !== allowedOrigin && parsed.protocol !== "file:") {
+        if (parsed.protocol === "file:") return;
+        if (!isAllowedRendererOrigin(parsed.origin)) {
           log.warn("[security] Blocked navigation to", navigationUrl);
           event.preventDefault();
         }

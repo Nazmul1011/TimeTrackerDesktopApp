@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "description": "Gr8r Time Tracker + HRM Desktop Client",
   "private": true,
+  "author": {
+    "name": "Gr8r",
+    "email": "support@gr8rdesign.com"
+  },
   "main": "dist-electron/main/index.js",
   "scripts": {
     "dev": "npm run electron:dev",
@@ -15,7 +19,7 @@
     "electron:compile": "tsc -p tsconfig.electron.json",
     "electron": "npm run electron:compile && env -u ELECTRON_RUN_AS_NODE electron . --no-sandbox",
     "electron:dev": "npm run electron:compile && concurrently -k -n next,electron -c blue,magenta \"next dev -p 3000\" \"wait-on tcp:3000 && env -u ELECTRON_RUN_AS_NODE electron . --no-sandbox\"",
-    "electron:build": "npm run build && npm run electron:compile && env -u ELECTRON_RUN_AS_NODE electron-builder",
+    "electron:build": "npm run build && npm run electron:compile && env -u ELECTRON_RUN_AS_NODE electron-builder --linux AppImage deb",
     "prepare": "husky || true"
   },
   "dependencies": {
@@ -98,21 +102,34 @@
   "build": {
     "appId": "com.gr8r.timetracker",
     "productName": "Gr8r Time Tracker",
+    "copyright": "Copyright © 2026 Gr8r",
     "directories": {
       "output": "release",
       "buildResources": "resources"
     },
     "files": [
       "dist-electron/**/*",
-      ".next/**/*",
+      "out/**/*",
       "public/**/*",
       "package.json"
+    ],
+    "asarUnpack": [
+      "**/*.{node,dll}",
+      "**/better-sqlite3/**"
     ],
     "extraResources": [
       {
         "from": "resources",
         "to": "resources"
       }
-    ]
+    ],
+    "linux": {
+      "category": "Office",
+      "icon": "icons",
+      "maintainer": "Gr8r <admin@gr8r.studio>",
+      "target": [
+        "AppImage"
+      ]
+    }
   }
 }

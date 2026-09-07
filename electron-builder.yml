@@ -9,9 +9,13 @@ directories:
 
 files:
   - dist-electron/**/*
-  - .next/**/*
+  - out/**/*
   - public/**/*
   - package.json
+
+asarUnpack:
+  - "**/*.{node,dll}"
+  - "**/better-sqlite3/**"
 
 extraResources:
   - from: resources
@@ -30,11 +34,11 @@ win:
   icon: resources/icons/icon.ico
 
 linux:
+  category: Office
+  icon: icons
+  maintainer: Gr8r <admin@gr8r.studio>
   target:
     - AppImage
-    - deb
-  category: Office
-  icon: resources/icons
 
 nsis:
   oneClick: false

@@ -5,6 +5,7 @@
 import { app, BrowserWindow, shell } from "electron";
 import path from "path";
 import log from "electron-log/main";
+import { getRendererOrigin } from "./renderer-server";
 
 async function waitForRenderer(url: string, attempts = 40): Promise<void> {
   for (let i = 0; i < attempts; i++) {
@@ -59,8 +60,11 @@ export function createMainWindow(): BrowserWindow {
   });
 
   const isDev = !app.isPackaged;
-  const rendererUrl = process.env.ELECTRON_RENDERER_URL || "http://localhost:3000";
-  const startUrl = `${rendererUrl.replace(/\/$/, "")}/home`;
+  const rendererUrl =
+    getRendererOrigin() ||
+    process.env.ELECTRON_RENDERER_URL ||
+    "http://localhost:3000";
+  const startUrl = `${rendererUrl.replace(/\/$/, "")}/home/`;
 
   void (async () => {
     try {
