@@ -24,14 +24,15 @@ const RULES: Array<{ match: RegExp; name: string }> = [
   { match: /\b(obsidian)\b/i, name: "Obsidian" },
   { match: /\b(youtube)\b/i, name: "YouTube" },
   {
-    match:
-      /\b(terminal|gnome-terminal|konsole|alacritty|kitty|iterm|warp|hyper)\b/i,
+    match: /\b(terminal|gnome-terminal|konsole|alacritty|kitty|iterm|warp|hyper)\b/i,
     name: "Terminal",
   },
   {
     match: /\b(nautilus|dolphin|nemo|files|finder|explorer)\b/i,
     name: "Files",
   },
+  { match: /\bwindows terminal\b/i, name: "Windows Terminal" },
+  { match: /\bpowershell\b/i, name: "PowerShell" },
   { match: /\b(intellij|idea)\b/i, name: "IntelliJ" },
   { match: /\b(webstorm)\b/i, name: "WebStorm" },
   { match: /\b(pycharm)\b/i, name: "PyCharm" },
@@ -48,9 +49,7 @@ export function normalizeAppName(raw: string | null | undefined): string {
   }
 
   // Strip common Linux package prefixes: org.chromium.Chromium → Chromium
-  const dotted = trimmed.includes(".")
-    ? (trimmed.split(".").pop() ?? trimmed)
-    : trimmed;
+  const dotted = trimmed.includes(".") ? (trimmed.split(".").pop() ?? trimmed) : trimmed;
 
   // Title-case single tokens like "slack" → "Slack"
   if (/^[a-z0-9_-]+$/i.test(dotted) && dotted.length <= 32) {

@@ -37,7 +37,7 @@ export class TrackingService {
     screenshotIntervalMs: 5 * 60_000,
     enableScreenshots: true,
     firstScreenshotDelayMs: 3_000,
-    idleTimeoutMs: 3 * 60_000,
+    idleTimeoutMs: 1 * 60_000,
   };
   private screenshotTimer: NodeJS.Timeout | null = null;
   private firstShotTimer: NodeJS.Timeout | null = null;
@@ -99,7 +99,7 @@ export class TrackingService {
       idleTimeoutMs:
         typeof options?.idleTimeoutMs === "number"
           ? Math.max(0, options.idleTimeoutMs)
-          : 3 * 60_000,
+          : 1 * 60_000,
     };
     this.running = true;
     this.idlePauseInFlight = false;

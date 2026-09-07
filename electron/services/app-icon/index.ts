@@ -18,7 +18,22 @@ import log from "electron-log/main";
 
 const execFileAsync = promisify(execFile);
 const SIZE = 64;
-const CACHE_VERSION = "v2";
+const CACHE_VERSION = "v3";
+
+/** Windows shell hosts whose getFileIcon is a generic window, not a brand logo. */
+const GENERIC_EXE_BASENAMES = new Set([
+  "explorer.exe",
+  "applicationframehost.exe",
+  "searchhost.exe",
+  "shellexperiencehost.exe",
+  "startmenuexperiencehost.exe",
+  "runtimebroker.exe",
+  "dllhost.exe",
+  "rundll32.exe",
+  "openwith.exe",
+  "systemsettings.exe",
+  "textinputhost.exe",
+]);
 
 const NAME_ALIASES: Record<string, string[]> = {
   chrome: ["Google Chrome", "Chrome", "Chromium"],
@@ -68,12 +83,16 @@ export class AppIconService {
 
   /** Kept for main bootstrap compatibility. */
   bindProtocol(): void {
-    log.info("[AppIconService] using data-URL icons (sips/icns on macOS)");
+    log.info("[AppIconService] using data-URL icons (sips on macOS, getFileIcon on Windows)");
   }
 
   async getIconDataUrl(appName: string): Promise<string | null> {
     const key = this.cacheKey(appName);
     if (!key) return null;
+    if (this.shouldUseLetterIcon(appName)) {
+      this.cache.set(key, null);
+      return null;
+    }
 
     if (this.cache.has(key)) {
       return this.cache.get(key) ?? null;
@@ -121,6 +140,10 @@ export class AppIconService {
   ): Promise<string | null> {
     const key = this.cacheKey(appName);
     if (!key) return null;
+    if (this.shouldUseLetterIcon(appName)) {
+      this.cache.set(key, null);
+      return null;
+    }
     if (this.cache.has(key) && this.cache.get(key)) {
       return this.cache.get(key) ?? null;
     }
@@ -133,6 +156,17 @@ export class AppIconService {
     } catch {
       return this.getIconDataUrl(appName);
     }
+  }
+
+  private shouldUseLetterIcon(appName: string): boolean {
+    const key = appName.trim().toLowerCase();
+    return (
+      key === "files" ||
+      key === "explorer" ||
+      key === "file explorer" ||
+      key === "windows explorer" ||
+      key.includes("file explorer")
+    );
   }
 
   private cacheKey(appName: string): string {
@@ -207,17 +241,67 @@ export class AppIconService {
 
     // Windows / fallback
     try {
+      if (this.isGenericExePath(filePath)) return null;
+
       const image = await app.getFileIcon(filePath, { size: "normal" });
       if (image.isEmpty()) return null;
       const png = image.resize({ width: SIZE, height: SIZE }).toPNG();
       if (!png?.length || png.length < 800) return null;
-      // Skip generic template icons (identical ~5KB placeholders)
       if (png.length < 2000) return null;
+      if (this.isGenericShellIcon(image.resize({ width: SIZE, height: SIZE }))) {
+        return null;
+      }
       fs.writeFileSync(outPath, png);
       return `data:image/png;base64,${png.toString("base64")}`;
     } catch (error) {
       log.debug("[AppIconService] getFileIcon failed", error);
       return null;
+    }
+  }
+
+  private isGenericExePath(filePath: string): boolean {
+    return GENERIC_EXE_BASENAMES.has(path.basename(filePath).toLowerCase());
+  }
+
+  /**
+   * Windows getFileIcon often returns a gray window / filmstrip glyph for
+   * Explorer and other shell hosts. Skip those so the UI can show a letter.
+   * Keep high-contrast 2-tone glyphs (Terminal).
+   */
+  private isGenericShellIcon(image: Electron.NativeImage): boolean {
+    try {
+      const bmp = image.toBitmap();
+      const { width, height } = image.getSize();
+      if (!bmp?.length || width < 8 || height < 8) return true;
+
+      const colors = new Set<string>();
+      let lumaSum = 0;
+      let opaque = 0;
+      let minL = 255;
+      let maxL = 0;
+
+      for (let i = 0; i + 3 < bmp.length; i += 16) {
+        const a = bmp[i + 3];
+        if (a < 40) continue;
+        const b = bmp[i];
+        const g = bmp[i + 1];
+        const r = bmp[i + 2];
+        const luma = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+        lumaSum += luma;
+        opaque += 1;
+        minL = Math.min(minL, luma);
+        maxL = Math.max(maxL, luma);
+        colors.add(`${r >> 4},${g >> 4},${b >> 4}`);
+        if (colors.size > 22) return false;
+      }
+
+      if (opaque < 8) return true;
+      const meanLuma = lumaSum / opaque;
+      const contrast = maxL - minL;
+      if (colors.size <= 4 && contrast >= 140) return false;
+      return colors.size <= 12 && meanLuma >= 130 && meanLuma <= 230;
+    } catch {
+      return false;
     }
   }
 
@@ -332,19 +416,36 @@ out;`,
       const script = `
 $ErrorActionPreference = 'SilentlyContinue'
 $name = ${JSON.stringify(appName)}
-$p = Get-Process | Where-Object {
-  $_.MainWindowHandle -ne 0 -and (
-    $_.ProcessName -like "*$name*" -or $_.MainWindowTitle -like "*$name*"
+$hit = Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | ForEach-Object {
+  $desc = ''
+  $exe = ''
+  try { $desc = $_.MainModule.FileVersionInfo.FileDescription } catch {}
+  try { $exe = $_.MainModule.FileName } catch {}
+  if (-not $exe) { try { $exe = $_.Path } catch {} }
+  [PSCustomObject]@{
+    Desc = [string]$desc
+    Name = [string]$_.ProcessName
+    Title = [string]$_.MainWindowTitle
+    Exe = [string]$exe
+  }
+} | Where-Object {
+  $_.Exe -and (
+    $_.Desc -like "*$name*" -or $_.Name -like "*$name*" -or $_.Title -like "*$name*"
   )
 } | Select-Object -First 1
-if ($p -and $p.Path) { $p.Path }
+if ($hit) { $hit.Exe }
 `;
       const { stdout } = await execFileAsync(
         "powershell.exe",
-        ["-NoProfile", "-NonInteractive", "-Command", script],
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
         { timeout: 4000, windowsHide: true },
       );
-      const p = stdout.trim();
+      const p =
+        stdout
+          .trim()
+          .split(/\r?\n/)
+          .map((s) => s.trim())
+          .find(Boolean) ?? "";
       if (p && fs.existsSync(p)) return p;
     } catch (error) {
       log.debug("[AppIconService] Windows exe lookup failed", error);

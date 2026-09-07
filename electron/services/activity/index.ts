@@ -212,6 +212,7 @@ export class ActivityService {
   /**
    * Windows foreground window via user32 + process metadata.
    * Uses a shipped PowerShell script for reliability on Windows.
+   * Output: appName RS windowTitle RS exePath
    */
   private async getWindowsActiveWindow(): Promise<ActiveWindowInfo> {
     const scriptPath = path.join(getResourcesRoot(), "scripts", "get-active-window.ps1");
@@ -231,12 +232,10 @@ export class ActivityService {
         .split(/\r?\n/)
         .map((s) => s.trim())
         .find((s) => s.includes("\u001e")) ?? stdout.trim();
-    const sep = line.indexOf("\u001e");
-    if (sep < 0) {
-      return { appName: line || "Desktop", windowTitle: "" };
-    }
-    const appName = line.slice(0, sep).trim() || "Desktop";
-    const windowTitle = line.slice(sep + 1).trim();
-    return { appName, windowTitle };
+    const parts = line.split("\u001e");
+    const appName = (parts[0] ?? "").trim() || "Desktop";
+    const windowTitle = (parts[1] ?? "").trim();
+    const bundlePath = (parts[2] ?? "").trim() || undefined;
+    return { appName, windowTitle, bundlePath };
   }
 }

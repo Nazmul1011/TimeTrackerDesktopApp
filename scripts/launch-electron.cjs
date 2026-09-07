@@ -26,6 +26,8 @@ if (process.platform === "darwin") {
 const child = spawn(binary, [root, "--no-sandbox"], {
   stdio: "inherit",
   env,
+  cwd: root,
+  windowsHide: false,
 });
 
 child.on("exit", (code, signal) => {

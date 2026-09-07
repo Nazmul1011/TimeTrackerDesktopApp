@@ -16,7 +16,7 @@ export type DesktopSettings = {
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   theme: "light",
   screenshotIntervalMinutes: 5,
-  idleTimeoutMinutes: 3,
+  idleTimeoutMinutes: 1,
   autoStartOnLogin: false,
   notificationsEnabled: true,
 };
@@ -37,7 +37,9 @@ export function normalizeDesktopSettings(
         : DEFAULT_DESKTOP_SETTINGS.screenshotIntervalMinutes,
     idleTimeoutMinutes:
       typeof merged.idleTimeoutMinutes === "number" && merged.idleTimeoutMinutes >= 0
-        ? merged.idleTimeoutMinutes === 0.5 || merged.idleTimeoutMinutes === 0.05
+        ? merged.idleTimeoutMinutes === 0.5 ||
+          merged.idleTimeoutMinutes === 0.05 ||
+          merged.idleTimeoutMinutes === 3
           ? DEFAULT_DESKTOP_SETTINGS.idleTimeoutMinutes
           : merged.idleTimeoutMinutes
         : DEFAULT_DESKTOP_SETTINGS.idleTimeoutMinutes,
