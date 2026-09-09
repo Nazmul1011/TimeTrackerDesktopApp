@@ -3,8 +3,12 @@
  * Capture lives in Electron main so it continues if the renderer is throttled.
  */
 import { BrowserWindow } from "electron";
+import fs from "fs";
+import path from "path";
 import log from "electron-log/main";
 import { ScreenshotService } from "../screenshots";
+import { screenshotFilename } from "../screenshots/compress";
+import { OfflineQueue } from "../offline/queue";
 import { ActivityService } from "../activity";
 import { InputActivityMonitor } from "../input-activity";
 import { NotificationService } from "../notifications";
@@ -56,6 +60,14 @@ export class TrackingService {
 
   isRunning(): boolean {
     return this.running;
+  }
+
+  getAuth(): TrackingAuth | null {
+    return this.auth;
+  }
+
+  async tryRefreshAccessToken(): Promise<boolean> {
+    return this.refreshAccessToken();
   }
 
   updateAuth(auth: Partial<TrackingAuth>) {
@@ -204,15 +216,25 @@ export class TrackingService {
 
       const win = await ActivityService.getInstance().getActiveWindow();
       const activityPercent = InputActivityMonitor.getInstance().consumePercent();
+      log.info(
+        `[TrackingService] uploading screenshot ${shot.buffer.length}B ${shot.mimeType}`,
+      );
       const uploaded = await this.uploadBuffer(shot.buffer, {
         timestamp: shot.capturedAt,
         appName: win.appName || "Desktop",
         windowTitle: win.windowTitle || "",
-        mimeType: "image/png",
+        mimeType: shot.mimeType || "image/jpeg",
         activityPercent,
       });
 
       if (!uploaded.ok) {
+        if (uploaded.queued) {
+          log.info("[TrackingService] screenshot queued offline");
+          this.emitToRenderer("screenshot:queued", {
+            message: uploaded.message,
+          });
+          return { ok: true, message: uploaded.message };
+        }
         this.emitToRenderer("screenshot:failed", {
           message: uploaded.message,
         });
@@ -245,15 +267,18 @@ export class TrackingService {
       mimeType: string;
       activityPercent: number;
     },
+    persistOnFailure = true,
   ): Promise<{
     ok: boolean;
+    queued?: boolean;
     message?: string;
     id?: string;
     url?: string;
     activityPercent?: number;
   }> {
     if (!this.auth?.accessToken || !this.auth.organizationId) {
-      return { ok: false, message: "Missing auth for screenshot upload" };
+      if (persistOnFailure) this.persistScreenshot(buffer, meta);
+      return { ok: false, queued: true, message: "Saved offline" };
     }
 
     const post = async () => {
@@ -268,34 +293,93 @@ export class TrackingService {
       });
     };
 
-    let response = await post();
+    try {
+      let response = await post();
 
-    if (response.status === 401) {
-      const refreshed = await this.refreshAccessToken();
-      if (refreshed) {
-        response = await post();
+      if (response.status === 401) {
+        const refreshed = await this.refreshAccessToken();
+        if (refreshed) {
+          response = await post();
+        }
       }
+
+      const json = (await response.json().catch(() => null)) as {
+        success?: boolean;
+        message?: string;
+        data?: { id?: string; url?: string; imageUrl?: string };
+      } | null;
+
+      if (!response.ok || !json?.success) {
+        if (this.shouldQueueUpload(response.status)) {
+          if (persistOnFailure) this.persistScreenshot(buffer, meta);
+          return { ok: false, queued: true, message: "Saved offline" };
+        }
+        const message =
+          json?.message || `Upload failed with status ${response.status}`;
+        log.warn(`[TrackingService] upload failed: ${message}`);
+        return { ok: false, message };
+      }
+
+      return {
+        ok: true,
+        id: json.data?.id,
+        url: json.data?.url ?? json.data?.imageUrl,
+        activityPercent: meta.activityPercent,
+      };
+    } catch (error) {
+      log.warn("[TrackingService] upload network error — queueing", error);
+      if (persistOnFailure) this.persistScreenshot(buffer, meta);
+      return { ok: false, queued: true, message: "Saved offline" };
     }
+  }
 
-    const json = (await response.json().catch(() => null)) as {
-      success?: boolean;
-      message?: string;
-      data?: { id?: string; url?: string; imageUrl?: string };
-    } | null;
+  async uploadScreenshotFile(filePath: string, meta: {
+    timestamp: string;
+    appName: string;
+    windowTitle: string;
+    mimeType: string;
+    activityPercent: number;
+  }) {
+    const buffer = await fs.promises.readFile(filePath);
+    return this.uploadBuffer(buffer, meta, false);
+  }
 
-    if (!response.ok || !json?.success) {
-      const message =
-        json?.message || `Upload failed with status ${response.status}`;
-      log.warn(`[TrackingService] upload failed: ${message}`);
-      return { ok: false, message };
+  private shouldQueueUpload(status: number): boolean {
+    return status === 0 || status >= 500 || status === 408 || status === 429;
+  }
+
+  private persistScreenshot(
+    buffer: Buffer,
+    meta: {
+      timestamp: string;
+      appName: string;
+      windowTitle: string;
+      mimeType: string;
+      activityPercent: number;
+    },
+  ) {
+    try {
+      const queue = OfflineQueue.getInstance();
+      const ext = meta.mimeType === "image/jpeg" ? "jpg" : "png";
+      const filePath = path.join(queue.screenshotDir(), `${Date.now()}-${process.pid}.${ext}`);
+      fs.writeFileSync(filePath, buffer);
+      queue.enqueueScreenshot({
+        filePath,
+        timestamp: meta.timestamp,
+        appName: meta.appName,
+        windowTitle: meta.windowTitle,
+        mimeType: meta.mimeType,
+        activityPercent: meta.activityPercent,
+      });
+      // Lazy import avoids a tracking ↔ sync cycle.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { SyncService } = require("../sync") as typeof import("../sync");
+      const sync = SyncService.getInstance();
+      sync.schedule();
+      sync.emitStatus();
+    } catch (error) {
+      log.error("[TrackingService] failed to persist screenshot offline", error);
     }
-
-    return {
-      ok: true,
-      id: json.data?.id,
-      url: json.data?.url ?? json.data?.imageUrl,
-      activityPercent: meta.activityPercent,
-    };
   }
 
   private buildAuthHeaders(): Record<string, string> {
@@ -340,7 +424,7 @@ export class TrackingService {
     pushField("activityPercent", String(meta.activityPercent));
     chunks.push(
       Buffer.from(
-        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="screenshot.png"\r\nContent-Type: ${meta.mimeType}\r\n\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${screenshotFilename(meta.mimeType)}"\r\nContent-Type: ${meta.mimeType}\r\n\r\n`,
       ),
     );
     chunks.push(buffer);

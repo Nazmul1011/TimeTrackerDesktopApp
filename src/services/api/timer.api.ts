@@ -9,14 +9,18 @@ export type StartTimerPayload = {
   projectId?: string;
   description?: string;
   deviceId?: string;
+  occurredAt?: string;
 };
 
 export type StopTimerPayload = {
   description?: string;
+  deviceId?: string;
+  occurredAt?: string;
 };
 
 export type DeviceTimerPayload = {
   deviceId?: string;
+  occurredAt?: string;
 };
 
 export type StopTimerResult = {
@@ -37,17 +41,31 @@ export const timerApi = {
     if (payload.projectId && isValidProjectId(payload.projectId)) {
       body.projectId = payload.projectId.trim();
     }
+    if (payload.occurredAt) {
+      body.occurredAt = payload.occurredAt;
+    }
     const { data } = await apiClient.post<ApiResponse<{ timer: ApiTimer }>>(
       "/timer/start",
       body,
+      { timeout: 8000 },
     );
     return data.data.timer;
   },
 
   async stop(payload: StopTimerPayload = {}) {
+    const body: Record<string, string> = {
+      deviceId: payload.deviceId ?? ensureDeviceId(),
+    };
+    if (payload.description?.trim()) {
+      body.description = payload.description.trim();
+    }
+    if (payload.occurredAt) {
+      body.occurredAt = payload.occurredAt;
+    }
     const { data } = await apiClient.post<ApiResponse<StopTimerResult>>(
       "/timer/stop",
-      payload,
+      body,
+      { timeout: 8000 },
     );
     return data.data ?? { entries: [], count: 0, totalDurationSeconds: 0 };
   },
@@ -59,6 +77,7 @@ export const timerApi = {
         ...payload,
         deviceId: payload.deviceId ?? ensureDeviceId(),
       },
+      { timeout: 8000 },
     );
     return data.data.timer;
   },
@@ -70,6 +89,7 @@ export const timerApi = {
         ...payload,
         deviceId: payload.deviceId ?? ensureDeviceId(),
       },
+      { timeout: 8000 },
     );
     return data.data.timer;
   },

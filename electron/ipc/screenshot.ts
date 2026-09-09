@@ -13,13 +13,20 @@ export function registerScreenshotIpc(): void {
     if (!shot) {
       return { ok: false, message: "Capture failed" };
     }
-    log.info("[ipc:screenshot] captured", shot.width, "x", shot.height);
+    log.info(
+      "[ipc:screenshot] captured",
+      shot.width,
+      "x",
+      shot.height,
+      shot.mimeType,
+      `${shot.buffer.length}B`,
+    );
     return {
       ok: true,
       capturedAt: shot.capturedAt,
       width: shot.width,
       height: shot.height,
-      mimeType: "image/png",
+      mimeType: shot.mimeType,
       base64: shot.buffer.toString("base64"),
     };
   });

@@ -15,7 +15,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ROUTES } from "@/constants/routes";
 import { useTimerSync } from "@/hooks/useTimerSync";
 import { useTrackingAgent } from "@/hooks/useTrackingAgent";
+import { useOfflineSync } from "@/hooks/useOfflineSync";
 import { HOME_TAB_EVENT } from "@/lib/notification-nav";
+import { OfflineBanner } from "@/components/offline-banner";
 import { authApi } from "@/services/api/auth.api";
 import { orgApi } from "@/services/api/org.api";
 import { timerApi } from "@/services/api/timer.api";
@@ -37,6 +39,7 @@ export default function HomePage() {
 
   useTrackingAgent();
   useTimerSync({ onFocus: true });
+  useOfflineSync();
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -48,7 +51,7 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    if (!tokens.accessToken) {
+    if (!tokens.accessToken && !tokens.refreshToken) {
       router.replace(ROUTES.LOGIN);
       return;
     }
@@ -82,13 +85,21 @@ export default function HomePage() {
           });
           try {
             const current = await timerApi.current();
-            if (!cancelled) hydrateFromApi(current);
+            if (!cancelled && !useTimerStore.getState().isOfflineSession) {
+              hydrateFromApi(current);
+            }
           } catch {
             // Keep whatever timer state we already have (do not drop a running session)
           }
         }
-      } catch {
-        if (!cancelled) {
+      } catch (error) {
+        const status =
+          typeof error === "object" &&
+          error !== null &&
+          "response" in error
+            ? (error as { response?: { status?: number } }).response?.status
+            : undefined;
+        if (!cancelled && status === 401) {
           router.replace(ROUTES.LOGIN);
         }
       }
@@ -105,6 +116,7 @@ export default function HomePage() {
 
   return (
     <div className="app-shell">
+      <OfflineBanner />
       <Header />
       <TimerCard />
 

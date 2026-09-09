@@ -6,8 +6,21 @@
 export interface ElectronAPI {
   auth: {
     login: (payload: unknown) => Promise<unknown>;
-    logout: () => Promise<unknown>;
-    getSession: () => Promise<unknown>;
+    logout: () => Promise<{ ok: boolean }>;
+    getSession: () => Promise<{
+      accessToken: string | null;
+      refreshToken: string | null;
+      sessionToken: string | null;
+      organizationId: string | null;
+      deviceId: string | null;
+    } | null>;
+    saveSession: (payload: {
+      accessToken: string | null;
+      refreshToken: string | null;
+      sessionToken: string | null;
+      organizationId: string | null;
+      deviceId: string | null;
+    }) => Promise<{ ok: boolean; message?: string }>;
   };
   timer: {
     start: (payload: unknown) => Promise<unknown>;
@@ -122,8 +135,69 @@ export interface ElectronAPI {
     }>;
   };
   sync: {
-    run: () => Promise<unknown>;
-    getStatus: () => Promise<unknown>;
+    run: () => Promise<{
+      ok: boolean;
+      message?: string;
+      status?: {
+        status: string;
+        lastSyncedAt: string | null;
+        pending: { timer: number; activity: number; screenshots: number };
+      };
+    }>;
+    getStatus: () => Promise<{
+      status: string;
+      lastSyncedAt: string | null;
+      pending: { timer: number; activity: number; screenshots: number };
+      message?: string;
+    }>;
+    enqueueTimerEvent: (payload: {
+      type: "start" | "pause" | "resume" | "stop";
+      occurredAt: string;
+      projectId?: string | null;
+      description?: string | null;
+    }) => Promise<{ ok: boolean; id?: string }>;
+    saveLocalTimer: (payload: {
+      status: "idle" | "running" | "paused";
+      localId: string | null;
+      serverId: string | null;
+      projectId: string | null;
+      description: string;
+      startedAt: string | null;
+      elapsedMs: number;
+      baseElapsedMs: number;
+      segmentStartedAt: number | null;
+      isOffline: boolean;
+      todayLoggedMs?: number;
+      todayDate?: string | null;
+    }) => Promise<{ ok: boolean }>;
+    getLocalTimer: () => Promise<{
+      status: "idle" | "running" | "paused";
+      localId: string | null;
+      serverId: string | null;
+      projectId: string | null;
+      description: string;
+      startedAt: string | null;
+      elapsedMs: number;
+      baseElapsedMs: number;
+      segmentStartedAt: number | null;
+      isOffline: boolean;
+      todayLoggedMs?: number;
+      todayDate?: string | null;
+    } | null>;
+    enqueueActivities: (payloads: unknown[]) => Promise<{ ok: boolean }>;
+    pendingCounts: () => Promise<{
+      timer: number;
+      activity: number;
+      screenshots: number;
+    }>;
+    onStatus: (
+      callback: (payload: {
+        status: string;
+        lastSyncedAt: string | null;
+        pending: { timer: number; activity: number; screenshots: number };
+        message?: string;
+      }) => void,
+    ) => () => void;
   };
   window: {
     scheduleRevealAfterResume: (payload?: {

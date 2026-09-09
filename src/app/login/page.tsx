@@ -3,7 +3,7 @@
  */
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +37,7 @@ function getErrorMessage(err: unknown, fallback: string): string {
 export default function LoginPage() {
   const router = useRouter();
   const setSession = useAuthStore((s) => s.setSession);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -49,6 +50,12 @@ export default function LoginPage() {
     refresh_token: string;
     session_token: string;
   } | null>(null);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      router.replace(ROUTES.HOME);
+    }
+  }, [isAuthenticated, router]);
 
   const finishLogin = async (
     tokens: {

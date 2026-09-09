@@ -8,6 +8,7 @@ import { dayjs } from "@/lib/dayjs";
 import { TIMER_STOPPED_EVENT } from "@/lib/timer-events";
 import { reportsApi } from "@/services/api/reports.api";
 import { toIsoDate } from "@/services/api/timesheet.api";
+import { isNetworkError } from "@/lib/network";
 import { useAuthStore } from "@/store/auth.store";
 
 export type PeriodSummary = {
@@ -109,6 +110,7 @@ export function useSummaryStats() {
         },
       });
     } catch (err) {
+      if (isNetworkError(err)) return;
       const message =
         typeof err === "object" &&
         err !== null &&

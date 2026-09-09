@@ -9,6 +9,7 @@ import fs from "fs/promises";
 import os from "os";
 import path from "path";
 import log from "electron-log/main";
+import { compressScreenshot } from "./compress";
 
 const execFileAsync = promisify(execFile);
 
@@ -17,6 +18,7 @@ export type CapturedScreenshot = {
   width: number;
   height: number;
   capturedAt: string;
+  mimeType: string;
 };
 
 const THUMB_SIZES = [
@@ -61,18 +63,45 @@ export class ScreenshotService {
           ? await this.captureViaDesktopCapturer()
           : await this.captureViaCli();
       if (shot?.buffer?.length) {
+        const compressed = await this.compressOrPassthrough(shot);
         log.info(
           `[ScreenshotService] captured via ${method}`,
-          shot.width,
+          compressed.width,
           "x",
-          shot.height,
+          compressed.height,
+          compressed.mimeType,
+          `${compressed.buffer.length}B`,
         );
-        return { ...shot, capturedAt };
+        return { ...compressed, capturedAt };
       }
     }
 
     log.error("[ScreenshotService] All capture methods failed");
     return null;
+  }
+
+  private async compressOrPassthrough(
+    shot: Omit<CapturedScreenshot, "capturedAt" | "mimeType"> & {
+      mimeType?: string;
+    },
+  ): Promise<Omit<CapturedScreenshot, "capturedAt">> {
+    try {
+      const compressed = await compressScreenshot(shot.buffer);
+      return {
+        buffer: compressed.buffer,
+        width: compressed.width,
+        height: compressed.height,
+        mimeType: compressed.mimeType,
+      };
+    } catch (error) {
+      log.error("[ScreenshotService] compression failed; sending original", error);
+      return {
+        buffer: shot.buffer,
+        width: shot.width,
+        height: shot.height,
+        mimeType: shot.mimeType ?? "image/png",
+      };
+    }
   }
 
   private async captureViaDesktopCapturer(): Promise<Omit<
@@ -124,6 +153,7 @@ export class ScreenshotService {
           buffer: png,
           width: preferred.size.width,
           height: preferred.size.height,
+          mimeType: "image/png",
         };
       }
 
@@ -212,6 +242,7 @@ $g.Dispose(); $bmp.Dispose()
           buffer,
           width: 0,
           height: 0,
+          mimeType: "image/png",
         };
       } catch (error) {
         log.debug(`[ScreenshotService] ${cmd.bin} unavailable/failed`, error);

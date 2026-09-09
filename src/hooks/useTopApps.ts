@@ -8,6 +8,7 @@ import { iconForAppName } from "@/lib/app-name";
 import { TIMER_STOPPED_EVENT } from "@/lib/timer-events";
 import { activityApi } from "@/services/api/activity.api";
 import { toIsoDate } from "@/services/api/timesheet.api";
+import { isNetworkError } from "@/lib/network";
 import { useAuthStore } from "@/store/auth.store";
 
 export type TopAppChip = {
@@ -80,6 +81,7 @@ export function useTopApps() {
 
       setApps(top);
     } catch (err) {
+      if (isNetworkError(err)) return;
       const message =
         typeof err === "object" &&
         err !== null &&

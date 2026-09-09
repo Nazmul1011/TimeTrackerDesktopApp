@@ -8,6 +8,7 @@ import {
   type TrackingAuth,
   type TrackingOptions,
 } from "../services/tracking";
+import { SyncService } from "../services/sync";
 
 export function registerTrackingIpc(): void {
   const tracking = TrackingService.getInstance();
@@ -66,6 +67,7 @@ export function registerTrackingIpc(): void {
     "tracking:updateAuth",
     async (_event, payload: Partial<TrackingAuth>) => {
       tracking.updateAuth(payload);
+      SyncService.getInstance().schedule(400);
       return { ok: true };
     },
   );

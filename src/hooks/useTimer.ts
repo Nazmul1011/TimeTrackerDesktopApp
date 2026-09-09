@@ -11,6 +11,11 @@ import { dispatchTimerStopped, TIMER_STOPPED_EVENT } from "@/lib/timer-events";
 import { timerApi } from "@/services/api/timer.api";
 import { timesheetApi } from "@/services/api/timesheet.api";
 import { sanitizeProjectId } from "@/lib/project";
+import { isNetworkError, isOfflineNow } from "@/lib/network";
+import {
+  enqueueTimerEvent,
+  persistLocalTimer,
+} from "@/services/timer/offline-persist";
 import {
   cancelWindowReveal,
   scheduleWindowRevealAfterResume,
@@ -47,6 +52,9 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
   const setProject = useTimerStore((s) => s.setProject);
   const setDescription = useTimerStore((s) => s.setDescription);
   const reset = useTimerStore((s) => s.reset);
+  const applyLocalStart = useTimerStore((s) => s.applyLocalStart);
+  const applyLocalPause = useTimerStore((s) => s.applyLocalPause);
+  const applyLocalResume = useTimerStore((s) => s.applyLocalResume);
 
   const busyRef = useRef(false);
   const missingTimerStreakRef = useRef(0);
@@ -54,8 +62,10 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
 
   const refreshTodayTotal = useCallback(async () => {
     if (!isAuthenticated || !organizationId) return;
+    if (useTimerStore.getState().isOfflineSession) return;
     try {
       const seconds = await timesheetApi.getTodayLoggedSeconds();
+      if (useTimerStore.getState().isOfflineSession) return;
       setTodayLoggedSeconds(seconds);
     } catch {
       // keep previous total
@@ -64,8 +74,10 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
 
   const refreshCurrent = useCallback(async () => {
     if (!isAuthenticated || !organizationId) return;
+    if (useTimerStore.getState().isOfflineSession) return;
     try {
       const current = await timerApi.current();
+      if (useTimerStore.getState().isOfflineSession) return;
       hydrateFromApi(current);
     } catch {
       // keep local state if sync fails
@@ -97,6 +109,10 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
             missingTimerStreakRef.current = 0;
             return;
           }
+          if (useTimerStore.getState().isOfflineSession) {
+            missingTimerStreakRef.current = 0;
+            return;
+          }
           // A single empty /timer/current (auth blip, race after start)
           // used to call setIdle() and kill screenshot capture. Confirm twice.
           missingTimerStreakRef.current += 1;
@@ -119,6 +135,7 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
   // Refresh today's total after any stop (local or remote)
   useEffect(() => {
     const onStopped = () => {
+      if (useTimerStore.getState().isOfflineSession) return;
       void refreshTodayTotal();
     };
     window.addEventListener(TIMER_STOPPED_EVENT, onStopped);
@@ -155,22 +172,52 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
         ensureToday();
         const resolved =
           projectId !== undefined ? projectId : timer.projectId;
-        // Keep picker in sync (e.g. timesheet Play / General)
         setProject(resolved ?? null);
-        const apiTimer = await timerApi.start({
-          projectId: sanitizeProjectId(resolved),
-          description: timer.description || undefined,
-        });
-        hydrateFromApi(apiTimer);
-        cancelWindowReveal();
-      } catch (err) {
-        toast.error(getErrorMessage(err, "Failed to start timer"));
+        const occurredAt = new Date().toISOString();
+        const goOffline = async () => {
+          applyLocalStart({
+            projectId: resolved,
+            description: timer.description,
+            occurredAt,
+          });
+          await enqueueTimerEvent({
+            type: "start",
+            occurredAt,
+            projectId: sanitizeProjectId(resolved),
+            description: timer.description || undefined,
+          });
+          cancelWindowReveal();
+          toast.message(
+            "Timer started offline — will sync when you are back online",
+          );
+        };
+        if (isOfflineNow()) {
+          await goOffline();
+          return;
+        }
+        try {
+          const apiTimer = await timerApi.start({
+            projectId: sanitizeProjectId(resolved),
+            description: timer.description || undefined,
+            occurredAt,
+          });
+          hydrateFromApi(apiTimer);
+          persistLocalTimer();
+          cancelWindowReveal();
+        } catch (err) {
+          if (isNetworkError(err)) {
+            await goOffline();
+            return;
+          }
+          toast.error(getErrorMessage(err, "Failed to start timer"));
+        }
       } finally {
         setSyncing(false);
         busyRef.current = false;
       }
     },
     [
+      applyLocalStart,
       ensureToday,
       hydrateFromApi,
       setProject,
@@ -184,45 +231,115 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
     if (busyRef.current) return;
     busyRef.current = true;
     setSyncing(true);
+    const occurredAt = new Date().toISOString();
     try {
-      const apiTimer = await timerApi.pause();
+      if (isOfflineNow()) {
+        applyLocalPause();
+        await enqueueTimerEvent({ type: "pause", occurredAt });
+        cancelWindowReveal();
+        toast.message("Paused offline — will sync when you are back online");
+        return;
+      }
+      const apiTimer = await timerApi.pause({ occurredAt });
       hydrateFromApi(apiTimer);
+      persistLocalTimer();
       cancelWindowReveal();
     } catch (err) {
+      if (isNetworkError(err)) {
+        applyLocalPause();
+        await enqueueTimerEvent({ type: "pause", occurredAt });
+        cancelWindowReveal();
+        toast.message("Paused offline — will sync when you are back online");
+        return;
+      }
       toast.error(getErrorMessage(err, "Failed to pause timer"));
     } finally {
       setSyncing(false);
       busyRef.current = false;
     }
-  }, [hydrateFromApi, setSyncing]);
+  }, [applyLocalPause, hydrateFromApi, setSyncing]);
 
   const resume = useCallback(async () => {
     if (busyRef.current) return;
     busyRef.current = true;
     setSyncing(true);
+    const occurredAt = new Date().toISOString();
     try {
-      const apiTimer = await timerApi.resume();
+      if (isOfflineNow()) {
+        applyLocalResume();
+        await enqueueTimerEvent({ type: "resume", occurredAt });
+        scheduleWindowRevealAfterResume();
+        toast.message("Resumed offline — will sync when you are back online");
+        return;
+      }
+      const apiTimer = await timerApi.resume({ occurredAt });
       hydrateFromApi(apiTimer);
+      persistLocalTimer();
       scheduleWindowRevealAfterResume();
     } catch (err) {
+      if (isNetworkError(err)) {
+        applyLocalResume();
+        await enqueueTimerEvent({ type: "resume", occurredAt });
+        scheduleWindowRevealAfterResume();
+        toast.message("Resumed offline — will sync when you are back online");
+        return;
+      }
       toast.error(getErrorMessage(err, "Failed to resume timer"));
     } finally {
       setSyncing(false);
       busyRef.current = false;
     }
-  }, [hydrateFromApi, setSyncing]);
+  }, [applyLocalResume, hydrateFromApi, setSyncing]);
 
   const stop = useCallback(async () => {
     if (busyRef.current) return;
     busyRef.current = true;
     setSyncing(true);
+    const occurredAt = new Date().toISOString();
+    const finishLocalStop = async () => {
+      const sessionSeconds = Math.max(
+        0,
+        Math.round(
+          (getDisplayMs() - useTimerStore.getState().todayLoggedMs) / 1000,
+        ),
+      );
+      await enqueueTimerEvent({
+        type: "stop",
+        occurredAt,
+        description: timer.description || undefined,
+      });
+      const previousLogged = useTimerStore.getState().todayLoggedMs;
+      setIdle();
+      useTimerStore.getState().setOfflineSession(true);
+      if (sessionSeconds > 0) {
+        setTodayLoggedSeconds(previousLogged / 1000 + sessionSeconds);
+      }
+      persistLocalTimer();
+      cancelWindowReveal();
+      if (sessionSeconds > 0) {
+        dispatchTimerStopped({
+          totalDurationSeconds: sessionSeconds,
+          entryCount: 1,
+        });
+        toast.success(
+          `Saved ${formatElapsed(sessionSeconds * 1000)} locally — will sync online`,
+        );
+      } else {
+        toast.success("Timer stopped offline — will sync when you are back online");
+      }
+    };
     try {
+      if (isOfflineNow()) {
+        await finishLocalStop();
+        return;
+      }
       const sessionSeconds = Math.max(
         0,
         Math.round((getDisplayMs() - useTimerStore.getState().todayLoggedMs) / 1000),
       );
       const result = await timerApi.stop({
         description: timer.description || undefined,
+        occurredAt,
       });
       const rows = result?.entries ?? [];
       const fromEntries = rows.reduce(
@@ -233,6 +350,7 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
         result?.totalDurationSeconds || fromEntries || sessionSeconds;
       const previousLogged = useTimerStore.getState().todayLoggedMs;
       setIdle();
+      persistLocalTimer();
       cancelWindowReveal();
       if (savedSeconds > 0) {
         setTodayLoggedSeconds(previousLogged / 1000 + savedSeconds);
@@ -248,6 +366,10 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
         toast.success("Timer stopped");
       }
     } catch (err) {
+      if (isNetworkError(err)) {
+        await finishLocalStop();
+        return;
+      }
       toast.error(getErrorMessage(err, "Failed to stop timer"));
       await refreshCurrent();
     } finally {

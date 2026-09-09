@@ -15,6 +15,8 @@ import { normalizeAppName } from "@/lib/app-name";
 import { notifyToast } from "@/lib/notify";
 import { cancelWindowReveal } from "@/lib/window-reveal";
 import { getElectronAPI, isElectron } from "@/services/electron";
+import { enqueueTimerEvent } from "@/services/timer/offline-persist";
+import { isNetworkError, isOfflineNow } from "@/lib/network";
 import { useAuthStore } from "@/store/auth.store";
 import { useSettingsStore } from "@/store/settings.store";
 import { useTimerStore } from "@/store/timer.store";
@@ -221,12 +223,21 @@ export function useTrackingAgent() {
       if (cancelled) return;
       if (useTimerStore.getState().timer.status !== "running") return;
       void (async () => {
+        const occurredAt = new Date().toISOString();
         try {
-          const apiTimer = await timerApi.pause();
+          if (isOfflineNow()) {
+            throw new Error("offline");
+          }
+          const apiTimer = await timerApi.pause({ occurredAt });
           useTimerStore.getState().hydrateFromApi(apiTimer);
           cancelWindowReveal();
-          // Native OS notification is shown from the main process (TrackingService).
         } catch (err) {
+          if (isNetworkError(err) || isOfflineNow()) {
+            useTimerStore.getState().applyLocalPause();
+            await enqueueTimerEvent({ type: "pause", occurredAt });
+            cancelWindowReveal();
+            return;
+          }
           console.warn("[tracking] idle auto-pause failed", err);
         }
       })();
@@ -332,10 +343,21 @@ export function useTrackingAgent() {
     const flush = async () => {
       const batch = queueRef.current.splice(0, queueRef.current.length);
       if (!batch.length) return;
+      const electron = getElectronAPI();
       try {
+        if (typeof navigator !== "undefined" && navigator.onLine === false) {
+          if (electron?.sync?.enqueueActivities) {
+            await electron.sync.enqueueActivities(batch);
+            return;
+          }
+        }
         await activityApi.bulk(batch);
       } catch {
-        queueRef.current = [...batch, ...queueRef.current].slice(0, 200);
+        if (electron?.sync?.enqueueActivities) {
+          await electron.sync.enqueueActivities(batch);
+        } else {
+          queueRef.current = [...batch, ...queueRef.current].slice(0, 200);
+        }
       }
     };
 

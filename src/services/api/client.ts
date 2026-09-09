@@ -4,6 +4,7 @@
  */
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
 import { STORAGE_KEYS } from "@/constants/storage";
+import { clearPersistedAuthSession, savePersistedAuthSession } from "@/services/electron/auth-session";
 import type { ApiResponse, AuthTokens } from "./types";
 
 const baseURL =
@@ -72,6 +73,13 @@ async function refreshAccessToken(): Promise<string | null> {
     );
     const newAccessToken = response.data.data.access_token;
     localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, newAccessToken);
+    savePersistedAuthSession({
+      accessToken: newAccessToken,
+      refreshToken: localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN),
+      sessionToken: localStorage.getItem(STORAGE_KEYS.SESSION_TOKEN),
+      organizationId: localStorage.getItem(STORAGE_KEYS.ORGANIZATION_ID),
+      deviceId: localStorage.getItem(STORAGE_KEYS.DEVICE_ID),
+    });
     if (typeof window !== "undefined") {
       window.dispatchEvent(
         new CustomEvent("auth:token-refreshed", {
@@ -80,10 +88,16 @@ async function refreshAccessToken(): Promise<string | null> {
       );
     }
     return newAccessToken;
-  } catch {
-    localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
-    localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
-    localStorage.removeItem(STORAGE_KEYS.SESSION_TOKEN);
+  } catch (error) {
+    const status =
+      axios.isAxiosError(error) ? error.response?.status : undefined;
+    // Network failures must not sign the user out — offline tracking needs the session.
+    if (status === 401 || status === 403) {
+      localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+      localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
+      localStorage.removeItem(STORAGE_KEYS.SESSION_TOKEN);
+      clearPersistedAuthSession();
+    }
     return null;
   }
 }
@@ -116,12 +130,6 @@ apiClient.interceptors.response.use(
     const newAccessToken = await refreshPromise;
 
     if (!newAccessToken) {
-      if (
-        typeof window !== "undefined" &&
-        !window.location.pathname.startsWith("/login")
-      ) {
-        window.location.href = "/login";
-      }
       return Promise.reject(error);
     }
 

@@ -5,6 +5,7 @@ export const IPC_CHANNELS = {
   AUTH_LOGIN: "auth:login",
   AUTH_LOGOUT: "auth:logout",
   AUTH_GET_SESSION: "auth:getSession",
+  AUTH_SAVE_SESSION: "auth:saveSession",
   TIMER_START: "timer:start",
   TIMER_STOP: "timer:stop",
   TIMER_PAUSE: "timer:pause",

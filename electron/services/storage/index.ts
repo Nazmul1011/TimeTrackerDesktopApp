@@ -1,11 +1,29 @@
 /**
- * Storage Service — empty stub wrapping electron-store.
+ * Persistent desktop storage via electron-store (survives app restarts).
+ * Auth must live here — production serves the renderer on a new localhost
+ * port each launch, so Chromium localStorage is a different origin every time.
  */
 import log from "electron-log/main";
 
+export type PersistedAuthSession = {
+  accessToken: string | null;
+  refreshToken: string | null;
+  sessionToken: string | null;
+  organizationId: string | null;
+  deviceId: string | null;
+};
+
 type StoreSchema = {
   settings: Record<string, unknown>;
-  authToken: string | null;
+  auth: PersistedAuthSession;
+};
+
+const EMPTY_AUTH: PersistedAuthSession = {
+  accessToken: null,
+  refreshToken: null,
+  sessionToken: null,
+  organizationId: null,
+  deviceId: null,
 };
 
 type StoreLike = {
@@ -13,12 +31,26 @@ type StoreLike = {
   set: <K extends keyof StoreSchema>(key: K, value: StoreSchema[K]) => void;
 };
 
+function normalizeAuth(raw: unknown): PersistedAuthSession {
+  if (!raw || typeof raw !== "object") return { ...EMPTY_AUTH };
+  const value = raw as Record<string, unknown>;
+  const asString = (key: string) =>
+    typeof value[key] === "string" && value[key] ? (value[key] as string) : null;
+  return {
+    accessToken: asString("accessToken"),
+    refreshToken: asString("refreshToken"),
+    sessionToken: asString("sessionToken"),
+    organizationId: asString("organizationId"),
+    deviceId: asString("deviceId"),
+  };
+}
+
 export class StorageService {
   private static instance: StorageService | null = null;
   private store: StoreLike | null = null;
   private memory: StoreSchema = {
     settings: {},
-    authToken: null,
+    auth: { ...EMPTY_AUTH },
   };
 
   private constructor() {
@@ -54,15 +86,20 @@ export class StorageService {
     }
   }
 
-  getAuthToken(): string | null {
-    return this.store?.get("authToken") ?? this.memory.authToken;
+  getAuthSession(): PersistedAuthSession {
+    return normalizeAuth(this.store?.get("auth") ?? this.memory.auth);
   }
 
-  setAuthToken(token: string | null): void {
+  setAuthSession(session: PersistedAuthSession): void {
+    const next = normalizeAuth(session);
     if (this.store) {
-      this.store.set("authToken", token);
+      this.store.set("auth", next);
     } else {
-      this.memory.authToken = token;
+      this.memory.auth = next;
     }
+  }
+
+  clearAuthSession(): void {
+    this.setAuthSession({ ...EMPTY_AUTH });
   }
 }

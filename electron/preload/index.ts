@@ -10,6 +10,8 @@ const electronAPI = {
     login: (payload: unknown) => ipcRenderer.invoke("auth:login", payload),
     logout: () => ipcRenderer.invoke("auth:logout"),
     getSession: () => ipcRenderer.invoke("auth:getSession"),
+    saveSession: (payload: unknown) =>
+      ipcRenderer.invoke("auth:saveSession", payload),
   },
   // Timer
   timer: {
@@ -90,6 +92,19 @@ const electronAPI = {
   sync: {
     run: () => ipcRenderer.invoke("sync:run"),
     getStatus: () => ipcRenderer.invoke("sync:getStatus"),
+    enqueueTimerEvent: (payload: unknown) =>
+      ipcRenderer.invoke("sync:enqueueTimerEvent", payload),
+    saveLocalTimer: (payload: unknown) =>
+      ipcRenderer.invoke("sync:saveLocalTimer", payload),
+    getLocalTimer: () => ipcRenderer.invoke("sync:getLocalTimer"),
+    enqueueActivities: (payload: unknown) =>
+      ipcRenderer.invoke("sync:enqueueActivities", payload),
+    pendingCounts: () => ipcRenderer.invoke("sync:pendingCounts"),
+    onStatus: (callback: (payload: unknown) => void) => {
+      const listener = (_event: unknown, payload: unknown) => callback(payload);
+      ipcRenderer.on("sync:status", listener);
+      return () => ipcRenderer.removeListener("sync:status", listener);
+    },
   },
   // Platform helpers
   platform: process.platform,

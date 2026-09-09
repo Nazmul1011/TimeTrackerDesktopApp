@@ -15,6 +15,7 @@ export function useTimerSync(options?: { onFocus?: boolean; intervalMs?: number 
 
   const sync = useCallback(async () => {
     if (!isAuthenticated || !organizationId) return;
+    if (useTimerStore.getState().isOfflineSession) return;
     try {
       const synced = await timerApi.sync();
       hydrateFromApi(synced);

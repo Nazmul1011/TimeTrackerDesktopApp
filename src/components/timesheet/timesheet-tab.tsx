@@ -41,7 +41,7 @@ export function TimesheetTab() {
         ),
       );
     } catch {
-      setEntries([]);
+      // Keep cached rows when offline so a stop doesn't blank the timesheet.
     } finally {
       setLoading(false);
     }

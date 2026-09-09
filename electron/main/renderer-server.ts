@@ -59,6 +59,8 @@ function resolveFile(root: string, urlPath: string): string | null {
   return null;
 }
 
+const PREFERRED_PORT = 17831;
+
 export async function startRendererServer(): Promise<string> {
   if (rendererOrigin) return rendererOrigin;
 
@@ -89,9 +91,24 @@ export async function startRendererServer(): Promise<string> {
   });
 
   await new Promise<void>((resolve, reject) => {
-    server!.once("error", reject);
-    // Bind localhost only — renderer is local to this machine
-    server!.listen(0, "127.0.0.1", () => resolve());
+    const tryListen = (port: number) => {
+      const onError = (err: NodeJS.ErrnoException) => {
+        if (port !== 0 && err.code === "EADDRINUSE") {
+          log.warn(
+            `[renderer-server] port ${port} in use, falling back to a random port`,
+          );
+          tryListen(0);
+          return;
+        }
+        reject(err);
+      };
+      server!.once("error", onError);
+      server!.listen(port, "127.0.0.1", () => {
+        server!.off("error", onError);
+        resolve();
+      });
+    };
+    tryListen(PREFERRED_PORT);
   });
 
   const address = server.address();

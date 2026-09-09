@@ -1,9 +1,14 @@
 /**
  * Auth Zustand store — session, orgs, tokens, device.
+ * Tokens are mirrored to Electron main so production restarts stay signed in.
  */
 import { create } from "zustand";
 import { STORAGE_KEYS } from "@/constants/storage";
 import { ensureDeviceId } from "@/services/api/client";
+import {
+  clearPersistedAuthSession,
+  savePersistedAuthSession,
+} from "@/services/electron/auth-session";
 import type { OrganizationWithMembership } from "@/services/api/types";
 import type { User } from "@/types";
 
@@ -20,6 +25,7 @@ interface AuthState {
   tokens: AuthTokensState;
   deviceId: string | null;
   isAuthenticated: boolean;
+  sessionHydrated: boolean;
   setSession: (payload: {
     user?: User | null;
     organizations?: OrganizationWithMembership[];
@@ -27,9 +33,11 @@ interface AuthState {
     accessToken?: string | null;
     refreshToken?: string | null;
     sessionToken?: string | null;
+    deviceId?: string | null;
   }) => void;
   setOrganizationId: (organizationId: string | null) => void;
   setOrganizations: (organizations: OrganizationWithMembership[]) => void;
+  markSessionHydrated: () => void;
   clearSession: () => void;
 }
 
@@ -54,6 +62,17 @@ function readInitialOrgId(): string | null {
   return localStorage.getItem(STORAGE_KEYS.ORGANIZATION_ID);
 }
 
+function persistToElectron() {
+  const state = useAuthStore.getState();
+  savePersistedAuthSession({
+    accessToken: state.tokens.accessToken,
+    refreshToken: state.tokens.refreshToken,
+    sessionToken: state.tokens.sessionToken,
+    organizationId: state.organizationId,
+    deviceId: state.deviceId,
+  });
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   organizations: [],
@@ -61,9 +80,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   tokens: readInitialTokens(),
   deviceId: readInitialDeviceId(),
   isAuthenticated: Boolean(readInitialTokens().accessToken),
+  sessionHydrated: false,
 
   setSession: (payload) => {
-    const deviceId = ensureDeviceId();
+    const deviceId = payload.deviceId ?? ensureDeviceId();
+    if (payload.deviceId) {
+      localStorage.setItem(STORAGE_KEYS.DEVICE_ID, payload.deviceId);
+    }
 
     if (payload.accessToken !== undefined) {
       if (payload.accessToken) {
@@ -128,8 +151,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       organizationId,
       tokens,
       deviceId,
-      isAuthenticated: Boolean(tokens.accessToken),
+      isAuthenticated: Boolean(tokens.accessToken || tokens.refreshToken),
     });
+    persistToElectron();
   },
 
   setOrganizationId: (organizationId) => {
@@ -139,15 +163,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       localStorage.removeItem(STORAGE_KEYS.ORGANIZATION_ID);
     }
     set({ organizationId });
+    persistToElectron();
   },
 
   setOrganizations: (organizations) => set({ organizations }),
+
+  markSessionHydrated: () => set({ sessionHydrated: true }),
 
   clearSession: () => {
     localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
     localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
     localStorage.removeItem(STORAGE_KEYS.SESSION_TOKEN);
     localStorage.removeItem(STORAGE_KEYS.ORGANIZATION_ID);
+    clearPersistedAuthSession();
     set({
       user: null,
       organizations: [],
