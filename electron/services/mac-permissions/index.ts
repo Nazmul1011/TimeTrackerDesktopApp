@@ -1,6 +1,10 @@
 /**
  * macOS TCC helpers — Screen Recording + Automation (System Events).
- * Screen Recording is prompted by using desktopCapturer (not askForMediaAccess).
+ *
+ * Electron's getMediaAccessStatus("screen") often reports "denied" even when
+ * the System Settings toggle is already on. Never skip capture because of that
+ * API. Ask at most once (not-determined probe). Real success/failure comes
+ * from an actual screenshot attempt.
  */
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -10,30 +14,50 @@ import log from "electron-log/main";
 const execFileAsync = promisify(execFile);
 
 export type MacPermissionStatus =
-  | "granted"
-  | "denied"
-  | "restricted"
-  | "unknown"
-  | "not-determined";
+  "granted" | "denied" | "restricted" | "unknown" | "not-determined";
 
 export class MacPermissions {
   private static screenProbeDone = false;
+  private static captureBlockedThisProcess = false;
+  private static cliUsedThisProcess = false;
 
   static getScreenStatus(): MacPermissionStatus {
     if (process.platform !== "darwin") return "granted";
     try {
-      return systemPreferences.getMediaAccessStatus(
-        "screen",
-      ) as MacPermissionStatus;
+      return systemPreferences.getMediaAccessStatus("screen") as MacPermissionStatus;
     } catch {
       return "unknown";
     }
   }
 
+  static isCaptureBlocked(): boolean {
+    return this.captureBlockedThisProcess;
+  }
+
+  static markCaptureSucceeded(): void {
+    this.captureBlockedThisProcess = false;
+  }
+
+  static markCaptureFailed(): void {
+    this.captureBlockedThisProcess = true;
+  }
+
+  static clearCaptureBlock(): void {
+    this.captureBlockedThisProcess = false;
+  }
+
+  static canUseCliFallback(): boolean {
+    return !this.cliUsedThisProcess;
+  }
+
+  static markCliUsed(): void {
+    this.cliUsedThisProcess = true;
+  }
+
   /**
-   * Ensure Screen Recording access for desktopCapturer / screencapture.
-   * Returns true when capture should be attempted (granted OR not-determined).
-   * Returns false only when explicitly denied/restricted.
+   * Log TCC status and show the system prompt at most once.
+   * Always returns true so capture can run — "denied" from Electron is often wrong
+   * when Screen Recording is already enabled in System Settings.
    */
   static async ensureScreenRecording(): Promise<boolean> {
     if (process.platform !== "darwin") return true;
@@ -42,34 +66,37 @@ export class MacPermissions {
     log.info("[MacPermissions] screen recording status:", status);
 
     if (status === "granted") return true;
-    if (status === "denied" || status === "restricted") {
-      log.warn(
-        "[MacPermissions] Screen Recording denied — enable Gr8r Time Tracker (or Electron) in System Settings → Privacy & Security → Screen Recording, then restart",
-      );
-      return false;
-    }
 
-    // not-determined / unknown — trigger the macOS TCC prompt via desktopCapturer.
-    if (!this.screenProbeDone) {
-      this.screenProbeDone = true;
-      try {
-        await desktopCapturer.getSources({
-          types: ["screen"],
-          thumbnailSize: { width: 1, height: 1 },
-          fetchWindowIcons: false,
-        });
-      } catch (error) {
-        log.warn("[MacPermissions] screen permission probe failed", error);
+    if (status === "not-determined" || status === "unknown") {
+      if (!this.screenProbeDone) {
+        this.screenProbeDone = true;
+        try {
+          await desktopCapturer.getSources({
+            types: ["screen"],
+            thumbnailSize: { width: 1, height: 1 },
+            fetchWindowIcons: false,
+          });
+        } catch (error) {
+          log.warn("[MacPermissions] screen permission probe failed", error);
+        }
+        status = this.getScreenStatus();
+        log.info("[MacPermissions] screen recording status after probe:", status);
       }
-      status = this.getScreenStatus();
-      log.info("[MacPermissions] screen recording status after probe:", status);
+    } else if (status === "denied" || status === "restricted") {
+      log.info(
+        "[MacPermissions] Electron reports denied — still capturing (Settings toggle is often already on)",
+      );
     }
 
-    // Still allow capture attempts while the user decides (not-determined).
-    return status !== "denied" && status !== "restricted";
+    return true;
   }
 
-  /** Open System Settings → Privacy & Security → Screen Recording. */
+  static async requestScreenRecordingOnce(): Promise<boolean> {
+    if (this.captureBlockedThisProcess) return false;
+    await this.ensureScreenRecording();
+    return true;
+  }
+
   static async openScreenRecordingSettings(): Promise<void> {
     if (process.platform !== "darwin") return;
     try {
@@ -81,7 +108,6 @@ export class MacPermissions {
     }
   }
 
-  /** Open Accessibility settings (needed for System Events window titles). */
   static async openAccessibilitySettings(): Promise<void> {
     if (process.platform !== "darwin") return;
     try {
@@ -93,7 +119,6 @@ export class MacPermissions {
     }
   }
 
-  /** Probe whether System Events can read the frontmost process. */
   static async canReadFrontApp(): Promise<boolean> {
     if (process.platform !== "darwin") return true;
     try {

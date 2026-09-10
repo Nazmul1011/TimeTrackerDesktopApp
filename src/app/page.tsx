@@ -1,9 +1,15 @@
-/**
- * Root page — redirects to /home.
- */
-import { redirect } from "next/navigation";
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { ROUTES } from "@/constants/routes";
 
 export default function RootPage() {
-  redirect(ROUTES.HOME);
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace(ROUTES.HOME);
+  }, [router]);
+
+  return null;
 }

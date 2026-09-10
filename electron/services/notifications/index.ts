@@ -6,7 +6,7 @@ import { execFile } from "child_process";
 import fs from "fs";
 import path from "path";
 import { promisify } from "util";
-import { app, nativeImage, Notification } from "electron";
+import { app, BrowserWindow, nativeImage, Notification, screen, shell } from "electron";
 import log from "electron-log/main";
 import { SettingsService } from "../settings";
 import { WindowRevealService } from "../window-reveal";
@@ -19,6 +19,8 @@ export class NotificationService {
 
   /** Keep references until closed — otherwise GC can drop the toast. */
   private active: Notification[] = [];
+  private overlay: BrowserWindow | null = null;
+  private overlayTimer: NodeJS.Timeout | null = null;
 
   static getInstance(): NotificationService {
     if (!NotificationService.instance) {
@@ -38,8 +40,17 @@ export class NotificationService {
           }`;
     return this.show(
       "Timer paused",
-      `No mouse or keyboard activity for ${duration}. Your timer has been paused.`,
+      `No mouse or keyboard activity for ${duration}. Timer paused — it will resume when you move the mouse or press a key.`,
       { urgency: "critical" },
+    );
+  }
+
+  /** Desktop alert when idle auto-pause ends and tracking starts again. */
+  showTimerIdleResumed(): { ok: boolean; message?: string } {
+    return this.show(
+      "Timer started",
+      "Activity detected — idle pause removed. The timer is running again.",
+      { urgency: "normal" },
     );
   }
 
@@ -55,6 +66,18 @@ export class NotificationService {
 
     const safeTitle = title || "Gr8r Time Tracker";
     const safeBody = body || "";
+
+    // Notification Center is unreliable for unsigned Electron on macOS (banner
+    // is accepted then never shown). Always draw our own on-screen banner.
+    this.showOverlayBanner(safeTitle, safeBody);
+    this.playAlertSound();
+
+    // Unsigned/ad-hoc Electron on macOS often reports Notification.isSupported()
+    // then silently drops the banner. AppleScript still reaches Notification Center.
+    if (process.platform === "darwin") {
+      void this.showMacOsascriptFallback(safeTitle, safeBody);
+      return { ok: true };
+    }
 
     if (Notification.isSupported()) {
       const electronResult = this.showElectron(safeTitle, safeBody, options);
@@ -72,11 +95,6 @@ export class NotificationService {
 
     if (process.platform === "win32") {
       void this.showWindowsToastFallback(safeTitle, safeBody);
-      return { ok: true };
-    }
-
-    if (process.platform === "darwin") {
-      void this.showMacOsascriptFallback(safeTitle, safeBody);
       return { ok: true };
     }
 
@@ -111,7 +129,7 @@ export class NotificationService {
       });
       notification.on("close", cleanup);
       notification.on("failed", (_event, error) => {
-        log.warn("[NotificationService] notification failed event", error);
+        log.warn("[NotificationService] Notification Center rejected the banner", error);
         cleanup();
         if (process.platform === "linux") {
           void this.showLinuxNotifySend(title, body, options?.urgency);
@@ -123,13 +141,6 @@ export class NotificationService {
       });
 
       notification.show();
-      if (process.platform === "darwin") {
-        try {
-          app.dock?.bounce("critical");
-        } catch {
-          // ignore
-        }
-      }
       log.info("[NotificationService] shown via Electron", { title, body });
       return { ok: true };
     } catch (error) {
@@ -168,11 +179,6 @@ export class NotificationService {
       const escapeAs = (value: string) => value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
       const script = `display notification "${escapeAs(body)}" with title "${escapeAs(title)}" sound name "Glass"`;
       await execFileAsync("osascript", ["-e", script], { timeout: 3000 });
-      try {
-        app.dock?.bounce("critical");
-      } catch {
-        // ignore
-      }
       log.info("[NotificationService] shown via osascript", { title, body });
       return true;
     } catch (error) {
@@ -229,6 +235,176 @@ $notifier.Show($toast)
     } catch (error) {
       log.warn("[NotificationService] Windows toast fallback failed", error);
       return false;
+    }
+  }
+
+  /**
+   * Always-on-top banner that does not go through Notification Center.
+   * Unsigned Electron on macOS is allowed to "show" a system toast, then macOS
+   * never draws it — this is what the user actually sees.
+   */
+  private showOverlayBanner(title: string, body: string) {
+    this.closeOverlay();
+
+    const escapeHtml = (value: string) =>
+      value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+
+    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    const width = 380;
+    const height = 104;
+    const gap = 16;
+    const x = Math.round(display.workArea.x + display.workArea.width - width - gap);
+    const y = Math.round(display.workArea.y + gap);
+
+    const win = new BrowserWindow({
+      width,
+      height,
+      x,
+      y,
+      frame: false,
+      transparent: false,
+      backgroundColor: "#111827",
+      resizable: false,
+      movable: true,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      focusable: false,
+      alwaysOnTop: true,
+      show: false,
+      hasShadow: true,
+      roundedCorners: true,
+      ...(process.platform === "darwin" ? { type: "panel" as const } : {}),
+      title: "gr8r-idle-toast",
+      webPreferences: {
+        sandbox: false,
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    win.setAlwaysOnTop(true, "screen-saver");
+
+    const iconUrl = this.brandIconDataUrl();
+    const iconHtml = iconUrl
+      ? `<img class="brand" src="${iconUrl}" alt="" />`
+      : `<div class="dot">g</div>`;
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body { margin: 0; background: #111827; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .card {
+    padding: 14px 16px;
+    color: #fff;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    cursor: pointer;
+    height: 100vh;
+    box-sizing: border-box;
+  }
+  .brand {
+    width: 28px; height: 28px; border-radius: 8px; flex: none;
+    object-fit: cover; background: #2B7FFF;
+  }
+  .dot {
+    width: 28px; height: 28px; border-radius: 8px; flex: none;
+    background: #2B7FFF; color: #fff; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; font-size: 15px;
+  }
+  .title { font-size: 13px; font-weight: 600; line-height: 1.2; }
+  .body { margin-top: 4px; font-size: 11px; line-height: 1.35; color: #e5e7eb; }
+</style>
+</head>
+<body>
+  <div class="card" onclick="window.close()">
+    ${iconHtml}
+    <div>
+      <div class="title">${escapeHtml(title)}</div>
+      <div class="body">${escapeHtml(body)}</div>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    win.on("closed", () => {
+      if (this.overlay === win) this.overlay = null;
+    });
+
+    void (async () => {
+      try {
+        await win.loadURL("about:blank");
+        await win.webContents.executeJavaScript(
+          `document.open();document.write(${JSON.stringify(html)});document.close();`,
+        );
+        if (win.isDestroyed()) return;
+        win.showInactive();
+        win.moveTop();
+        log.info("[NotificationService] on-screen banner visible", { title });
+      } catch (error) {
+        log.warn("[NotificationService] on-screen banner failed", error);
+      }
+    })();
+
+    this.overlay = win;
+    this.overlayTimer = setTimeout(() => this.closeOverlay(), 12_000);
+  }
+
+  private playAlertSound() {
+    if (process.platform === "darwin") {
+      void execFileAsync("afplay", ["/System/Library/Sounds/Glass.aiff"], {
+        timeout: 4000,
+      }).catch((error) => {
+        log.warn("[NotificationService] afplay failed", error);
+        try {
+          shell.beep();
+        } catch {
+          // ignore
+        }
+      });
+      return;
+    }
+    try {
+      shell.beep();
+    } catch {
+      // ignore
+    }
+  }
+
+  private closeOverlay() {
+    if (this.overlayTimer) {
+      clearTimeout(this.overlayTimer);
+      this.overlayTimer = null;
+    }
+    if (this.overlay && !this.overlay.isDestroyed()) {
+      this.overlay.close();
+    }
+    this.overlay = null;
+  }
+
+  private brandIconDataUrl(): string | null {
+    const logoSvg = path.join(app.getAppPath(), "public", "figma", "logo.svg");
+    const file = (fs.existsSync(logoSvg) ? logoSvg : null) ?? this.resolveIconPath();
+    if (!file) return null;
+    try {
+      const buf = fs.readFileSync(file);
+      const mime = file.endsWith(".svg")
+        ? "image/svg+xml"
+        : file.endsWith(".ico")
+          ? "image/x-icon"
+          : "image/png";
+      return `data:${mime};base64,${buf.toString("base64")}`;
+    } catch {
+      return null;
     }
   }
 

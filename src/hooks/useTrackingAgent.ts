@@ -111,6 +111,71 @@ export function useTrackingAgent() {
     });
   }, [tokens.accessToken, tokens.refreshToken, tokens.sessionToken, organizationId]);
 
+  // Idle auto-pause/resume stay subscribed after the running-timer effect tears down.
+  useEffect(() => {
+    if (!isAuthenticated || !isElectron()) return;
+    const api = getElectronAPI();
+    if (!api?.tracking) return;
+
+    const unsubIdle = api.tracking.onIdleTimeout?.(() => {
+      if (useTimerStore.getState().timer.status !== "running") return;
+      void (async () => {
+        try {
+          const apiTimer = await timerApi.pause();
+          useTimerStore.getState().hydrateFromApi(apiTimer);
+          cancelWindowReveal();
+          notifyToast(
+            "warning",
+            "Timer paused — you were idle. It will resume when you move the mouse or press a key.",
+          );
+        } catch (err) {
+          console.warn("[tracking] idle auto-pause failed", err);
+        }
+      })();
+    });
+
+    const unsubResume = api.tracking.onIdleResume(() => {
+      if (useTimerStore.getState().timer.status !== "paused") return;
+      void (async () => {
+        try {
+          const apiTimer = await timerApi.resume();
+          useTimerStore.getState().hydrateFromApi(apiTimer);
+          notifyToast("success", "Timer started — idle pause removed. Tracking is running again.");
+        } catch (err) {
+          console.warn("[tracking] idle auto-resume failed", err);
+        }
+      })();
+    });
+
+    return () => {
+      unsubIdle?.();
+      unsubResume();
+    };
+  }, [isAuthenticated]);
+
+  // Stop / logout must not leave an idle-resume watcher armed.
+  // Do not disarm while status is still "running" — idle pause arms the
+  // watcher before the renderer has hydrated to "paused".
+  const prevTimerStatusRef = useRef(timerStatus);
+  useEffect(() => {
+    if (!isElectron()) return;
+    const prev = prevTimerStatusRef.current;
+    prevTimerStatusRef.current = timerStatus;
+
+    if (!isAuthenticated) {
+      void getElectronAPI()?.tracking.disarmIdleResume?.();
+      return;
+    }
+    if (timerStatus === "paused") return;
+    if (timerStatus === "running") {
+      if (prev === "paused") {
+        void getElectronAPI()?.tracking.disarmIdleResume?.();
+      }
+      return;
+    }
+    void getElectronAPI()?.tracking.disarmIdleResume?.();
+  }, [timerStatus, isAuthenticated]);
+
   // Keep access tokens fresh — JWT expires in 15m and main-process uploads
   // use a snapshot of the token that otherwise goes stale.
   useEffect(() => {
@@ -208,21 +273,6 @@ export function useTrackingAgent() {
       }
     });
 
-    const unsubIdle = api.tracking.onIdleTimeout?.(() => {
-      if (cancelled) return;
-      if (useTimerStore.getState().timer.status !== "running") return;
-      void (async () => {
-        try {
-          const apiTimer = await timerApi.pause();
-          useTimerStore.getState().hydrateFromApi(apiTimer);
-          cancelWindowReveal();
-          // Native OS notification is shown from the main process (TrackingService).
-        } catch (err) {
-          console.warn("[tracking] idle auto-pause failed", err);
-        }
-      })();
-    });
-
     const startTracking = (cfg: MonitoringConfig | null) => {
       const state = useAuthStore.getState();
       const token = state.tokens.accessToken || localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
@@ -289,7 +339,6 @@ export function useTrackingAgent() {
       window.clearInterval(pollId);
       unsubUploaded();
       unsubFailed();
-      unsubIdle?.();
       void api.tracking.stop();
     };
   }, [isAuthenticated, organizationId, timerStatus, idleTimeoutMinutes]);

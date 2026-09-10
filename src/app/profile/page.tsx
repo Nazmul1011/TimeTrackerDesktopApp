@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { RiArrowLeftSLine } from "react-icons/ri";
 import { ProfileCard } from "@/components/profile/profile-card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -26,8 +27,7 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const organization =
-    organizations.find((o) => o.id === organizationId) ?? organizations[0];
+  const organization = organizations.find((o) => o.id === organizationId) ?? organizations[0];
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -75,7 +75,8 @@ export default function ProfilePage() {
           className="h-8 px-2 text-xs"
           onClick={() => router.push(ROUTES.HOME)}
         >
-          ← Back
+          <RiArrowLeftSLine size={16} />
+          Back
         </Button>
         <h1 className="text-sm text-[var(--text-subtle)]">Profile</h1>
         <div className="w-12" />

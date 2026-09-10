@@ -20,8 +20,8 @@ interface SettingsState {
   reset: () => Promise<void>;
 }
 
-/** Idle auto-pause when detection is on. Production default: 3 minutes. */
-export const DEFAULT_IDLE_TIMEOUT_MINUTES = 3;
+/** Idle auto-pause when detection is on. */
+export const DEFAULT_IDLE_TIMEOUT_MINUTES = 2;
 
 export function formatIdleTimeoutLabel(minutes: number): string {
   if (minutes <= 0) return "off";
@@ -50,8 +50,11 @@ function mergeSettings(partial: Partial<Settings>, base: Settings): Settings {
         : base.screenshotIntervalMinutes,
     idleTimeoutMinutes:
       typeof partial.idleTimeoutMinutes === "number" && partial.idleTimeoutMinutes >= 0
-        ? // Test defaults were 30s (0.5) and 3s (0.05); the only control is a toggle.
-          partial.idleTimeoutMinutes === 0.5 || partial.idleTimeoutMinutes === 0.05
+        ? // Test defaults were 30s (0.5) and 3s (0.05); 1 min and 3 min were previous defaults.
+          partial.idleTimeoutMinutes === 0.5 ||
+          partial.idleTimeoutMinutes === 0.05 ||
+          partial.idleTimeoutMinutes === 1 ||
+          partial.idleTimeoutMinutes === 3
           ? DEFAULT_IDLE_TIMEOUT_MINUTES
           : partial.idleTimeoutMinutes
         : base.idleTimeoutMinutes,

@@ -8,11 +8,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useOrgTimezone } from "@/hooks/useOrgTimezone";
 import { formatElapsed } from "@/lib/dayjs";
-import { dispatchTimerStopped, TIMER_STOPPED_EVENT } from "@/lib/timer-events";
+import { TIMER_STOPPED_EVENT } from "@/lib/timer-events";
+import {
+  pauseTimer,
+  resumeTimer,
+  runTimerMutation,
+  selectProject,
+  stopTimer,
+} from "@/lib/timer-actions";
 import { timerApi } from "@/services/api/timer.api";
 import { timesheetApi } from "@/services/api/timesheet.api";
 import { sanitizeProjectId } from "@/lib/project";
-import { cancelWindowReveal, scheduleWindowRevealAfterResume } from "@/lib/window-reveal";
+import { cancelWindowReveal } from "@/lib/window-reveal";
 import { useAuthStore } from "@/store/auth.store";
 import { useTimerStore } from "@/store/timer.store";
 
@@ -43,12 +50,10 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
   const setTodayLoggedSeconds = useTimerStore((s) => s.setTodayLoggedSeconds);
   const ensureToday = useTimerStore((s) => s.ensureToday);
   const getDisplayMs = useTimerStore((s) => s.getDisplayMs);
-  const setSyncing = useTimerStore((s) => s.setSyncing);
   const setProject = useTimerStore((s) => s.setProject);
   const setDescription = useTimerStore((s) => s.setDescription);
   const reset = useTimerStore((s) => s.reset);
 
-  const busyRef = useRef(false);
   const missingTimerStreakRef = useRef(0);
   const [, forceRender] = useState(0);
 
@@ -164,110 +169,43 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
 
   const start = useCallback(
     async (projectId?: string | null) => {
-      if (busyRef.current) return;
-      busyRef.current = true;
-      setSyncing(true);
-      try {
-        ensureToday();
-        // Default to whatever the picker shows, not the last session's project.
-        const resolved = projectId !== undefined ? projectId : selectedProjectId;
-        // Keep picker in sync (e.g. timesheet Play / General)
-        setProject(resolved ?? null);
-        const apiTimer = await timerApi.start({
-          projectId: sanitizeProjectId(resolved),
-          description: timer.description || undefined,
-        });
-        hydrateFromApi(apiTimer);
-        cancelWindowReveal();
-      } catch (err) {
-        toast.error(getErrorMessage(err, "Failed to start timer"));
-      } finally {
-        setSyncing(false);
-        busyRef.current = false;
-      }
+      await runTimerMutation(async () => {
+        try {
+          ensureToday();
+          // Default to whatever the picker shows, not the last session's project.
+          const resolved = projectId !== undefined ? projectId : selectedProjectId;
+          // Keep picker in sync (e.g. timesheet Play / General)
+          setProject(resolved ?? null);
+          const apiTimer = await timerApi.start({
+            projectId: sanitizeProjectId(resolved),
+            description: timer.description || undefined,
+          });
+          hydrateFromApi(apiTimer);
+          cancelWindowReveal();
+        } catch (err) {
+          toast.error(getErrorMessage(err, "Failed to start timer"));
+        }
+      });
     },
-    [ensureToday, hydrateFromApi, selectedProjectId, setProject, setSyncing, timer.description],
+    [ensureToday, hydrateFromApi, selectedProjectId, setProject, timer.description],
   );
 
   const pause = useCallback(async () => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setSyncing(true);
-    try {
-      const apiTimer = await timerApi.pause();
-      hydrateFromApi(apiTimer);
-      cancelWindowReveal();
-    } catch (err) {
-      toast.error(getErrorMessage(err, "Failed to pause timer"));
-    } finally {
-      setSyncing(false);
-      busyRef.current = false;
-    }
-  }, [hydrateFromApi, setSyncing]);
+    await pauseTimer();
+  }, []);
 
   const resume = useCallback(async () => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setSyncing(true);
-    try {
-      const apiTimer = await timerApi.resume();
-      hydrateFromApi(apiTimer);
-      scheduleWindowRevealAfterResume();
-    } catch (err) {
-      toast.error(getErrorMessage(err, "Failed to resume timer"));
-    } finally {
-      setSyncing(false);
-      busyRef.current = false;
-    }
-  }, [hydrateFromApi, setSyncing]);
+    await resumeTimer();
+  }, []);
 
   const stop = useCallback(async () => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setSyncing(true);
-    try {
-      const sessionSeconds = Math.max(
-        0,
-        Math.round((getDisplayMs() - useTimerStore.getState().todayLoggedMs) / 1000),
-      );
-      const result = await timerApi.stop({
-        description: timer.description || undefined,
-      });
-      const rows = result?.entries ?? [];
-      const fromEntries = rows.reduce((sum, entry) => sum + (entry.duration ?? 0), 0);
-      const savedSeconds = result?.totalDurationSeconds || fromEntries || sessionSeconds;
-      const previousLogged = useTimerStore.getState().todayLoggedMs;
-      setIdle();
-      cancelWindowReveal();
-      if (savedSeconds > 0) {
-        setTodayLoggedSeconds(previousLogged / 1000 + savedSeconds);
-      }
-      dispatchTimerStopped({
-        totalDurationSeconds: savedSeconds,
-        entryCount: result?.count ?? rows.length,
-      });
-      await refreshTodayTotal();
-      if (savedSeconds > 0) {
-        toast.success(`Saved ${formatElapsed(savedSeconds * 1000)} to timesheet`);
-      } else {
-        toast.success("Timer stopped");
-      }
-    } catch (err) {
-      toast.error(getErrorMessage(err, "Failed to stop timer"));
-      await refreshCurrent();
-    } finally {
-      setSyncing(false);
-      busyRef.current = false;
-    }
-  }, [
-    getDisplayMs,
-    refreshCurrent,
-    refreshTodayTotal,
-    setIdle,
-    setSyncing,
-    setTodayLoggedSeconds,
-    timer.description,
-  ]);
+    await stopTimer();
+  }, []);
+
+  // Reset / restart is disabled.
+  // const restart = useCallback(async () => {
+  //   await restartTimer();
+  // }, []);
 
   const displayMs = getDisplayMs();
 
@@ -285,6 +223,7 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
     stop,
     pause,
     resume,
+    selectProject,
     setProject,
     setDescription,
     reset,

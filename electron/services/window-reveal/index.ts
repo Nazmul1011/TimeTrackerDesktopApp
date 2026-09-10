@@ -3,6 +3,7 @@
  */
 import { app, BrowserWindow } from "electron";
 import log from "electron-log/main";
+import { applyDockIconSoon } from "../../utils/dock-icon";
 
 export class WindowRevealService {
   private static instance: WindowRevealService | null = null;
@@ -36,6 +37,8 @@ export class WindowRevealService {
     }
   }
 
+  private lastRevealAt = 0;
+
   /** Immediately show and focus the main window (platform-aware). */
   revealNow(options?: { bounce?: boolean }): void {
     const win = this.getMainWindow();
@@ -44,10 +47,16 @@ export class WindowRevealService {
       return;
     }
 
+    const bounce = options?.bounce === true;
+    const now = Date.now();
+    // Dock click + app.focus({ steal }) used to re-enter activate → blank Dock tile.
+    if (!bounce && now - this.lastRevealAt < 400) return;
+    this.lastRevealAt = now;
+
     if (process.platform === "win32") {
       this.revealWindows(win);
     } else if (process.platform === "darwin") {
-      this.revealMac(win, options?.bounce === true);
+      this.revealMac(win, bounce);
     } else {
       this.revealLinux(win);
     }
@@ -77,30 +86,20 @@ export class WindowRevealService {
 
   private revealMac(win: BrowserWindow, bounce: boolean): void {
     if (win.isMinimized()) win.restore();
-    win.show();
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    win.setAlwaysOnTop(true, "floating");
+    if (!win.isVisible()) win.show();
     win.focus();
 
-    try {
-      app.dock?.show();
-      app.focus({ steal: true });
-      // Bounce only for idle-resume attention — it resets dock.setIcon().
-      if (bounce) app.dock?.bounce("informational");
-    } catch {
+    // Never dock.show() / focus({ steal }) — that retriggers `activate` and
+    // blanks the packaged Dock tile. Bounce also clears the bundle icon, and
+    // packaged applyDockIcon() is a no-op, so skip bounce when packaged.
+    if (bounce && !app.isPackaged) {
       try {
-        app.focus();
+        app.dock?.bounce("informational");
+        applyDockIconSoon();
       } catch {
         // ignore
       }
     }
-
-    setTimeout(() => {
-      if (win.isDestroyed()) return;
-      win.setAlwaysOnTop(false);
-      win.setVisibleOnAllWorkspaces(false);
-      win.focus();
-    }, 1000);
   }
 
   private revealLinux(win: BrowserWindow): void {
@@ -125,6 +124,6 @@ export class WindowRevealService {
   }
 
   private getMainWindow(): BrowserWindow | undefined {
-    return BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
+    return BrowserWindow.getAllWindows().find((w) => !w.isDestroyed() && w.getSize()[1] > 200);
   }
 }

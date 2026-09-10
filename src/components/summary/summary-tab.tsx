@@ -105,7 +105,8 @@ export function SummaryTab() {
         ) : null}
         {!appsLoading && topApps.length === 0 && !appsError ? (
           <p className="text-[11px] leading-4 text-[var(--text-muted)]">
-            Start the timer to track which apps you use. Usage appears here after a short sync.
+            Start the timer to track which apps you use today. Usage appears here after a short
+            sync.
           </p>
         ) : null}
         {topApps.length > 0 ? (
@@ -114,7 +115,7 @@ export function SummaryTab() {
               <div
                 key={app.id}
                 className="flex min-w-[57px] items-center justify-center gap-1 rounded-full bg-[var(--surface-elevated)] px-2 py-1.5"
-                title={`${app.name} — ${formatProjectTriggerTime(app.totalDuration)} (${app.percent}% of tracked time this week)`}
+                title={`${app.name} — ${formatProjectTriggerTime(app.totalDuration)} (${app.percent}% of tracked time today)`}
               >
                 <AppIcon name={app.name} icon={app.icon} />
                 <span className="text-[11px] leading-[14px] text-[var(--text-muted)]">

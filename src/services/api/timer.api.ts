@@ -37,47 +37,33 @@ export const timerApi = {
     if (payload.projectId && isValidProjectId(payload.projectId)) {
       body.projectId = payload.projectId.trim();
     }
-    const { data } = await apiClient.post<ApiResponse<{ timer: ApiTimer }>>(
-      "/timer/start",
-      body,
-    );
+    const { data } = await apiClient.post<ApiResponse<{ timer: ApiTimer }>>("/timer/start", body);
     return data.data.timer;
   },
 
   async stop(payload: StopTimerPayload = {}) {
-    const { data } = await apiClient.post<ApiResponse<StopTimerResult>>(
-      "/timer/stop",
-      payload,
-    );
+    const { data } = await apiClient.post<ApiResponse<StopTimerResult>>("/timer/stop", payload);
     return data.data ?? { entries: [], count: 0, totalDurationSeconds: 0 };
   },
 
   async pause(payload: DeviceTimerPayload = {}) {
-    const { data } = await apiClient.post<ApiResponse<{ timer: ApiTimer }>>(
-      "/timer/pause",
-      {
-        ...payload,
-        deviceId: payload.deviceId ?? ensureDeviceId(),
-      },
-    );
+    const { data } = await apiClient.post<ApiResponse<{ timer: ApiTimer }>>("/timer/pause", {
+      ...payload,
+      deviceId: payload.deviceId ?? ensureDeviceId(),
+    });
     return data.data.timer;
   },
 
   async resume(payload: DeviceTimerPayload = {}) {
-    const { data } = await apiClient.post<ApiResponse<{ timer: ApiTimer }>>(
-      "/timer/resume",
-      {
-        ...payload,
-        deviceId: payload.deviceId ?? ensureDeviceId(),
-      },
-    );
+    const { data } = await apiClient.post<ApiResponse<{ timer: ApiTimer }>>("/timer/resume", {
+      ...payload,
+      deviceId: payload.deviceId ?? ensureDeviceId(),
+    });
     return data.data.timer;
   },
 
   async sync(payload: DeviceTimerPayload = {}) {
-    const { data } = await apiClient.post<
-      ApiResponse<{ timer: ApiTimer } | null>
-    >("/timer/sync", {
+    const { data } = await apiClient.post<ApiResponse<{ timer: ApiTimer } | null>>("/timer/sync", {
       ...payload,
       deviceId: payload.deviceId ?? ensureDeviceId(),
     });
@@ -85,13 +71,24 @@ export const timerApi = {
   },
 
   async current() {
-    const { data } = await apiClient.get<
-      ApiResponse<{ timer: ApiTimer } | ApiTimer | null>
-    >("/timer/current");
+    const { data } =
+      await apiClient.get<ApiResponse<{ timer: ApiTimer } | ApiTimer | null>>("/timer/current");
     const payload = data.data;
     if (!payload) return null;
     if ("timer" in payload && payload.timer) return payload.timer;
     if ("id" in payload && "startTime" in payload) return payload as ApiTimer;
     return null;
+  },
+
+  /** Discard the live session and delete today's timesheet + activity for this user. */
+  async resetDay() {
+    const { data } = await apiClient.post<
+      ApiResponse<{
+        date?: string;
+        entriesDeleted?: number;
+        activitiesDeleted?: number;
+      }>
+    >("/timer/reset-day");
+    return data.data;
   },
 };

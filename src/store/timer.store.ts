@@ -25,6 +25,11 @@ interface TimerState {
   todayLoggedMs: number;
   /** Org-timezone calendar day for todayLoggedMs */
   todayDate: string;
+  /**
+   * After a manual restart, the home clock is the live session only (00:00:00)
+   * until midnight. Timesheet entries are unchanged.
+   */
+  sessionClockOnly: boolean;
   isSyncing: boolean;
   setDescription: (description: string) => void;
   setProject: (projectId: string | null) => void;
@@ -36,6 +41,7 @@ interface TimerState {
   ) => void;
   setIdle: () => void;
   setTodayLoggedSeconds: (seconds: number) => void;
+  beginSessionClock: () => void;
   ensureToday: () => void;
   setSyncing: (isSyncing: boolean) => void;
   tick: () => void;
@@ -88,6 +94,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   baseElapsedMs: 0,
   todayLoggedMs: 0,
   todayDate: todayInZone(getOrgTimezone()),
+  sessionClockOnly: false,
   isSyncing: false,
 
   setDescription: (description) => set((s) => ({ timer: { ...s.timer, description } })),
@@ -151,10 +158,25 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     });
   },
 
+  beginSessionClock: () => {
+    const today = todayInZone(getOrgTimezone());
+    set({
+      sessionClockOnly: true,
+      todayLoggedMs: 0,
+      todayDate: today,
+      segmentStartedAt: null,
+      baseElapsedMs: 0,
+      timer: {
+        ...initialTimer,
+        elapsedMs: 0,
+      },
+    });
+  },
+
   ensureToday: () => {
     const today = todayInZone(getOrgTimezone());
     if (get().todayDate === today) return;
-    set({ todayDate: today, todayLoggedMs: 0 });
+    set({ todayDate: today, todayLoggedMs: 0, sessionClockOnly: false });
   },
 
   setSyncing: (isSyncing) => set({ isSyncing }),
@@ -177,6 +199,8 @@ export const useTimerStore = create<TimerState>((set, get) => ({
       state.timer.status === "running" || state.timer.status === "paused"
         ? state.timer.elapsedMs
         : 0;
+    // Restart makes the home clock a stopwatch from 00:00:00 until midnight.
+    if (state.sessionClockOnly) return sessionMs;
     // Must stay pure: this is read during render. The day rollover is applied
     // by ensureToday() from the ticking effects, so a total carried over from
     // a previous day is ignored here instead of being written away mid-render.
@@ -193,6 +217,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
       baseElapsedMs: 0,
       todayLoggedMs: 0,
       todayDate: todayInZone(getOrgTimezone()),
+      sessionClockOnly: false,
       isSyncing: false,
     }),
 }));

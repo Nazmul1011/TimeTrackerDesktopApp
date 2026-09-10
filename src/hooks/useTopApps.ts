@@ -1,17 +1,18 @@
 /**
- * Top Apps — live usage from /activity/apps (this week, exclude idle).
+ * Top Apps — live usage from /activity/apps for today only (resets at midnight).
  * Icons: OS icons via Electron gr8r-icon:// protocol; letter avatar fallback.
  */
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
 import { useOrgTimezone } from "@/hooks/useOrgTimezone";
-import { todayInZone, weekStartYmd } from "@/lib/org-date";
+import { todayInZone } from "@/lib/org-date";
 import { ACTIVITY_FLUSHED_EVENT } from "@/hooks/useTrackingAgent";
 import { TIMER_STOPPED_EVENT } from "@/lib/timer-events";
 import { activityApi } from "@/services/api/activity.api";
 import { getElectronAPI, isElectron } from "@/services/electron";
 import { useAuthStore } from "@/store/auth.store";
+import { useTimerStore } from "@/store/timer.store";
 
 export type TopAppChip = {
   id: string;
@@ -38,6 +39,7 @@ export function useTopApps() {
   const organizationId = useAuthStore((s) => s.organizationId);
   // Arrives with the org list, after the first render on a cold start.
   const orgTimezone = useOrgTimezone();
+  const todayDate = useTimerStore((s) => s.todayDate);
   const [apps, setApps] = useState<TopAppChip[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,25 +59,15 @@ export function useTopApps() {
       if (!opts?.silent) setIsLoading(true);
       setError(null);
 
-      // Ranges follow the org's calendar, matching how the backend stores days.
-      const timeZone = orgTimezone;
-      const weekStart = weekStartYmd(timeZone);
-      const today = todayInZone(timeZone);
+      // Today only — same calendar day as the main timer (org timezone).
+      const today = todayInZone(orgTimezone);
 
       try {
-        let rows = await activityApi.getApps({
-          startDate: weekStart,
+        const rows = await activityApi.getApps({
+          startDate: today,
           endDate: today,
           excludeIdle: true,
         });
-
-        if (rows.length === 0) {
-          rows = await activityApi.getApps({
-            startDate: today,
-            endDate: today,
-            excludeIdle: true,
-          });
-        }
 
         if (isStale()) return;
 
@@ -117,9 +109,10 @@ export function useTopApps() {
     setError(null);
   }, [organizationId]);
 
+  // Midnight (and org-day rollover) must drop yesterday's chips like the clock.
   useEffect(() => {
     void reload();
-  }, [reload]);
+  }, [reload, todayDate]);
 
   useEffect(() => {
     const onStopped = () => {

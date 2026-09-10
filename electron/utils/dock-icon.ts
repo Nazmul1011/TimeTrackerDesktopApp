@@ -19,13 +19,12 @@ function loadIcon(): NativeImage | null {
   return cached;
 }
 
-/** Apply the circular brand icon to the Dock. */
+/** Apply the circular brand icon to the Dock. Call at launch / after bounce only — not on every focus. */
 export function applyDockIcon(): void {
   if (process.platform !== "darwin" || !app.dock) return;
-  // Branded / packaged bundles already own the icon. setIcon() flashes the
-  // cached Electron atom, then paints ours — that is the click flicker.
-  const exe = app.getPath("exe");
-  if (app.isPackaged || exe.includes("Gr8r Time Tracker.app")) return;
+  // Packaged .app already has icon.icns / electron.icns. Runtime setIcon()
+  // replaces that with a PNG NativeImage; macOS Dock then shows a generic cube.
+  if (app.isPackaged) return;
   try {
     const image = loadIcon();
     if (!image) {

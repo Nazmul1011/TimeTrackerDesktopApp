@@ -56,6 +56,14 @@ const electronAPI = {
       ipcRenderer.on("tracking:idle-timeout", listener);
       return () => ipcRenderer.removeListener("tracking:idle-timeout", listener);
     },
+    onIdleResume: (callback: (payload: unknown) => void) => {
+      const listener = (_event: unknown, payload: unknown) => callback(payload);
+      ipcRenderer.on("tracking:idle-resume", listener);
+      return () => ipcRenderer.removeListener("tracking:idle-resume", listener);
+    },
+    disarmIdleResume: () => ipcRenderer.invoke("tracking:disarmIdleResume"),
+    openScreenRecording: () => ipcRenderer.invoke("tracking:openScreenRecording"),
+    retryScreenshots: () => ipcRenderer.invoke("tracking:retryScreenshots"),
   },
   // Activity
   activity: {
@@ -89,6 +97,14 @@ const electronAPI = {
   sync: {
     run: () => ipcRenderer.invoke("sync:run"),
     getStatus: () => ipcRenderer.invoke("sync:getStatus"),
+  },
+  tray: {
+    setState: (payload: unknown) => ipcRenderer.invoke("tray:setState", payload),
+    onCommand: (callback: (payload: { action?: string }) => void) => {
+      const listener = (_event: unknown, payload: { action?: string }) => callback(payload);
+      ipcRenderer.on("tray:command", listener);
+      return () => ipcRenderer.removeListener("tray:command", listener);
+    },
   },
   // Platform helpers
   platform: process.platform,
