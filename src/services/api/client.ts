@@ -3,11 +3,10 @@
  * Attaches auth/org/device headers and refreshes access token on 401.
  */
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
-import { STORAGE_KEYS } from "@/constants/storage";
+import { AUTH_EVENTS, STORAGE_KEYS } from "@/constants/storage";
 import type { ApiResponse, AuthTokens } from "./types";
 
-const baseURL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001";
+const baseURL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001";
 
 export const apiClient = axios.create({
   baseURL,
@@ -28,6 +27,61 @@ function getDeviceId(): string {
     localStorage.setItem(STORAGE_KEYS.DEVICE_ID, deviceId);
   }
   return deviceId;
+}
+
+function isAuthFailureStatus(status: number | undefined): boolean {
+  // Only a rejected refresh token should wipe login. 403 can be permission noise.
+  return status === 401;
+}
+
+function emitSessionInvalid() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(AUTH_EVENTS.SESSION_INVALID));
+}
+
+function emitTokenRefreshed(accessToken: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent(AUTH_EVENTS.TOKEN_REFRESHED, {
+      detail: { accessToken },
+    }),
+  );
+}
+
+function persistAccessToken(accessToken: string) {
+  localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, accessToken);
+  emitTokenRefreshed(accessToken);
+  // Keep durable Electron session in sync when only the access JWT rotates.
+  if (typeof window !== "undefined" && window.electronAPI?.auth?.saveSession) {
+    void window.electronAPI.auth.saveSession({
+      accessToken,
+      refreshToken: localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN),
+      sessionToken: localStorage.getItem(STORAGE_KEYS.SESSION_TOKEN),
+      organizationId: localStorage.getItem(STORAGE_KEYS.ORGANIZATION_ID),
+      user: (() => {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEYS.AUTH_USER);
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return null;
+        }
+      })(),
+      organizations: (() => {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEYS.AUTH_ORGANIZATIONS);
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return null;
+        }
+      })(),
+    });
+  }
+}
+
+function clearPersistedTokens() {
+  localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+  localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
+  localStorage.removeItem(STORAGE_KEYS.SESSION_TOKEN);
 }
 
 apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
@@ -58,7 +112,7 @@ apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 
 let refreshPromise: Promise<string | null> | null = null;
 
-async function refreshAccessToken(): Promise<string | null> {
+export async function refreshAccessToken(): Promise<string | null> {
   if (typeof window === "undefined") return null;
 
   const refreshToken = localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN);
@@ -71,19 +125,17 @@ async function refreshAccessToken(): Promise<string | null> {
       { headers: { "Content-Type": "application/json" } },
     );
     const newAccessToken = response.data.data.access_token;
-    localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, newAccessToken);
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(
-        new CustomEvent("auth:token-refreshed", {
-          detail: { accessToken: newAccessToken },
-        }),
-      );
-    }
+    if (!newAccessToken) return null;
+    persistAccessToken(newAccessToken);
     return newAccessToken;
-  } catch {
-    localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
-    localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
-    localStorage.removeItem(STORAGE_KEYS.SESSION_TOKEN);
+  } catch (error) {
+    const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+    // Only wipe the session when the refresh token itself is rejected.
+    // Network / backend-down must not log the user out.
+    if (isAuthFailureStatus(status)) {
+      clearPersistedTokens();
+      emitSessionInvalid();
+    }
     return null;
   }
 }
@@ -116,12 +168,6 @@ apiClient.interceptors.response.use(
     const newAccessToken = await refreshPromise;
 
     if (!newAccessToken) {
-      if (
-        typeof window !== "undefined" &&
-        !window.location.pathname.startsWith("/login")
-      ) {
-        window.location.href = "/login";
-      }
       return Promise.reject(error);
     }
 

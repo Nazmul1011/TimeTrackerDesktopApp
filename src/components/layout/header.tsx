@@ -6,6 +6,7 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { BrandLogo } from "@/components/brand/brand-logo";
 import { WorkspaceSelector } from "@/components/layout/workspace-selector";
 import { NotificationDropdownList } from "@/components/notification/notification-dropdown";
 import {
@@ -20,12 +21,14 @@ import { useNotificationNavigation } from "@/hooks/useNotificationNavigation";
 import { useNotifications } from "@/hooks/useNotifications";
 import { cn } from "@/lib/utils";
 import { signOutSession } from "@/lib/session";
+import { useTimerStore } from "@/store/timer.store";
 
 const headerIconClass =
   "inline-flex size-8 shrink-0 items-center justify-center rounded-lg p-2 outline-none transition-colors duration-150 hover:bg-[#f5f5f5] focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35 active:bg-[#efefef]";
 
 export function Header() {
   const router = useRouter();
+  const isPaused = useTimerStore((s) => s.timer.status === "paused");
   const { notifications, unreadCount, isLoading, error, loadNotifications, markAsRead } =
     useNotifications({ poll: true });
   const { navigateFromNotification } = useNotificationNavigation();
@@ -45,15 +48,9 @@ export function Header() {
         <Link
           href={ROUTES.HOME}
           className="relative size-8 shrink-0 overflow-hidden rounded-lg outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35"
+          title={isPaused ? "Timer paused" : "Gr8r"}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/figma/logo.svg"
-            alt="Gr8r"
-            className="size-full object-cover"
-            width={32}
-            height={32}
-          />
+          <BrandLogo paused={isPaused} title={isPaused ? "Timer paused" : "Gr8r"} />
         </Link>
         <WorkspaceSelector />
       </div>

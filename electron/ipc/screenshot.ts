@@ -1,5 +1,5 @@
 /**
- * Screenshot IPC — captures PNG bytes in main and returns base64 to renderer.
+ * Screenshot IPC — captures JPEG bytes in main and returns base64 to renderer.
  */
 import { ipcMain } from "electron";
 import log from "electron-log/main";
@@ -13,13 +13,13 @@ export function registerScreenshotIpc(): void {
     if (!shot) {
       return { ok: false, message: "Capture failed" };
     }
-    log.info("[ipc:screenshot] captured", shot.width, "x", shot.height);
+    log.info("[ipc:screenshot] captured", shot.width, "x", shot.height, shot.mimeType);
     return {
       ok: true,
       capturedAt: shot.capturedAt,
       width: shot.width,
       height: shot.height,
-      mimeType: "image/png",
+      mimeType: shot.mimeType,
       base64: shot.buffer.toString("base64"),
     };
   });

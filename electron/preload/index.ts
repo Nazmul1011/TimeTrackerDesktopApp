@@ -92,6 +92,8 @@ const electronAPI = {
       ipcRenderer.invoke("window:scheduleRevealAfterResume", payload ?? {}),
     cancelReveal: () => ipcRenderer.invoke("window:cancelReveal"),
     revealNow: () => ipcRenderer.invoke("window:revealNow"),
+    setTimerStatus: (status: "idle" | "running" | "paused") =>
+      ipcRenderer.invoke("window:setTimerStatus", status),
   },
   // Sync
   sync: {

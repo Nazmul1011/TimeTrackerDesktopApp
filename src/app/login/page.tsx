@@ -3,7 +3,7 @@
  */
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,8 +26,7 @@ import { toast } from "sonner";
 
 function getErrorMessage(err: unknown, fallback: string): string {
   if (typeof err === "object" && err !== null && "response" in err) {
-    const response = (err as { response?: { data?: { message?: string } } })
-      .response;
+    const response = (err as { response?: { data?: { message?: string } } }).response;
     if (response?.data?.message) return response.data.message;
   }
   if (err instanceof Error && err.message) return err.message;
@@ -37,18 +36,28 @@ function getErrorMessage(err: unknown, fallback: string): string {
 export default function LoginPage() {
   const router = useRouter();
   const setSession = useAuthStore((s) => s.setSession);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const hasHydrated = useAuthStore((s) => s.hasHydrated);
+  const user = useAuthStore((s) => s.user);
+  const organizationId = useAuthStore((s) => s.organizationId);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [pendingOrgs, setPendingOrgs] = useState<
-    OrganizationWithMembership[] | null
-  >(null);
+  const [pendingOrgs, setPendingOrgs] = useState<OrganizationWithMembership[] | null>(null);
   const [selectedOrgId, setSelectedOrgId] = useState<string>("");
   const [pendingTokens, setPendingTokens] = useState<{
     access_token: string;
     refresh_token: string;
     session_token: string;
   } | null>(null);
+
+  useEffect(() => {
+    if (!hasHydrated) return;
+    // Tokens alone are not enough — org selection still needs this page.
+    if (isAuthenticated && (user || organizationId)) {
+      router.replace(ROUTES.HOME);
+    }
+  }, [hasHydrated, isAuthenticated, organizationId, router, user]);
 
   const finishLogin = async (
     tokens: {
@@ -133,10 +142,7 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#f9fafb] p-6">
-      <form
-        onSubmit={handleSubmit}
-        className="surface-card w-full max-w-sm space-y-4 p-6"
-      >
+      <form onSubmit={handleSubmit} className="surface-card w-full max-w-sm space-y-4 p-6">
         <div className="flex flex-col items-center gap-2 text-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -147,9 +153,7 @@ export default function LoginPage() {
             height={40}
           />
           <h1 className="text-lg font-semibold text-[#1e2939]">Sign in</h1>
-          <p className="text-xs text-[var(--text-muted)]">
-            Gr8r Time Tracker desktop
-          </p>
+          <p className="text-xs text-[var(--text-muted)]">Gr8r Time Tracker desktop</p>
         </div>
 
         {!pendingOrgs ? (
@@ -213,11 +217,7 @@ export default function LoginPage() {
           className="w-full bg-[var(--brand)] hover:bg-[#1a6aef]"
           disabled={loading}
         >
-          {loading
-            ? "Signing in…"
-            : pendingOrgs
-              ? "Continue"
-              : "Sign in"}
+          {loading ? "Signing in…" : pendingOrgs ? "Continue" : "Sign in"}
         </Button>
       </form>
     </div>

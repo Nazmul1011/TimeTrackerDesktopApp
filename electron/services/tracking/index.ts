@@ -281,7 +281,7 @@ export class TrackingService {
         timestamp: shot.capturedAt,
         appName: win.appName || "Desktop",
         windowTitle: win.windowTitle || "",
-        mimeType: "image/png",
+        mimeType: shot.mimeType ?? "image/jpeg",
         activityPercent,
       });
 
@@ -411,7 +411,7 @@ export class TrackingService {
     pushField("activityPercent", String(meta.activityPercent));
     chunks.push(
       Buffer.from(
-        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="screenshot.png"\r\nContent-Type: ${meta.mimeType}\r\n\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="screenshot.jpg"\r\nContent-Type: ${meta.mimeType}\r\n\r\n`,
       ),
     );
     chunks.push(buffer);

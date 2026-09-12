@@ -10,6 +10,7 @@ import { ToastProvider } from "./toast-provider";
 import { TooltipProvider } from "./tooltip-provider";
 import { DialogProvider } from "./dialog-provider";
 import { TrackingAgentProvider } from "./tracking-agent-provider";
+import { AuthBootstrap } from "./auth-bootstrap";
 
 export function AppProviders({ children }: { children: ReactNode }) {
   return (
@@ -18,6 +19,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
         <TooltipProvider>
           <DialogProvider>
             <ToastProvider>
+              <AuthBootstrap />
               <TrackingAgentProvider>{children}</TrackingAgentProvider>
             </ToastProvider>
           </DialogProvider>

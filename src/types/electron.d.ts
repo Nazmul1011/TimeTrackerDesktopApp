@@ -7,7 +7,22 @@ export interface ElectronAPI {
   auth: {
     login: (payload: unknown) => Promise<unknown>;
     logout: () => Promise<unknown>;
-    getSession: () => Promise<unknown>;
+    getSession: () => Promise<{
+      accessToken: string | null;
+      refreshToken: string | null;
+      sessionToken: string | null;
+      organizationId: string | null;
+      user: unknown | null;
+      organizations: unknown[] | null;
+    } | null>;
+    saveSession: (payload: {
+      accessToken: string | null;
+      refreshToken: string | null;
+      sessionToken: string | null;
+      organizationId: string | null;
+      user: unknown | null;
+      organizations: unknown[] | null;
+    }) => Promise<{ ok: boolean; message?: string }>;
   };
   timer: {
     start: (payload: unknown) => Promise<unknown>;
@@ -140,6 +155,9 @@ export interface ElectronAPI {
     scheduleRevealAfterResume: (payload?: { delayMs?: number }) => Promise<{ ok: boolean }>;
     cancelReveal: () => Promise<{ ok: boolean }>;
     revealNow: () => Promise<{ ok: boolean }>;
+    setTimerStatus: (
+      status: "idle" | "running" | "paused",
+    ) => Promise<{ ok: boolean; message?: string }>;
   };
   platform: NodeJS.Platform;
   versions: {

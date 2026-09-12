@@ -10,6 +10,7 @@ import os from "os";
 import path from "path";
 import log from "electron-log/main";
 import { MacPermissions } from "../mac-permissions";
+import { compressScreenshot, SCREENSHOT_MIME } from "./compress";
 
 const execFileAsync = promisify(execFile);
 
@@ -17,6 +18,7 @@ export type CapturedScreenshot = {
   buffer: Buffer;
   width: number;
   height: number;
+  mimeType?: typeof SCREENSHOT_MIME;
   capturedAt: string;
 };
 
@@ -70,8 +72,14 @@ export class ScreenshotService {
         method === "electron" ? await this.captureViaDesktopCapturer() : await this.captureViaCli();
       if (shot?.buffer?.length) {
         MacPermissions.markCaptureSucceeded();
-        log.info(`[ScreenshotService] captured via ${method}`, shot.width, "x", shot.height);
-        return { ...shot, capturedAt };
+        const compressed = await compressScreenshot(shot.buffer, shot.width, shot.height);
+        log.info(
+          `[ScreenshotService] captured via ${method}`,
+          compressed.width,
+          "x",
+          compressed.height,
+        );
+        return { ...compressed, capturedAt };
       }
     }
 

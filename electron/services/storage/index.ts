@@ -1,16 +1,38 @@
 /**
- * Storage Service — empty stub wrapping electron-store.
+ * Storage Service — electron-store for settings + durable auth session.
+ * Auth must live here so Quit/reopen keeps the user signed in even if the
+ * renderer origin/port changes.
  */
 import log from "electron-log/main";
+
+export type PersistedAuthSession = {
+  accessToken: string | null;
+  refreshToken: string | null;
+  sessionToken: string | null;
+  organizationId: string | null;
+  user: unknown | null;
+  organizations: unknown[] | null;
+};
 
 type StoreSchema = {
   settings: Record<string, unknown>;
   authToken: string | null;
+  authSession: PersistedAuthSession | null;
 };
 
 type StoreLike = {
   get: <K extends keyof StoreSchema>(key: K) => StoreSchema[K];
   set: <K extends keyof StoreSchema>(key: K, value: StoreSchema[K]) => void;
+  delete: (key: keyof StoreSchema) => void;
+};
+
+const EMPTY_SESSION: PersistedAuthSession = {
+  accessToken: null,
+  refreshToken: null,
+  sessionToken: null,
+  organizationId: null,
+  user: null,
+  organizations: null,
 };
 
 export class StorageService {
@@ -19,6 +41,7 @@ export class StorageService {
   private memory: StoreSchema = {
     settings: {},
     authToken: null,
+    authSession: null,
   };
 
   private constructor() {
@@ -55,6 +78,8 @@ export class StorageService {
   }
 
   getAuthToken(): string | null {
+    const session = this.getAuthSession();
+    if (session?.accessToken) return session.accessToken;
     return this.store?.get("authToken") ?? this.memory.authToken;
   }
 
@@ -64,5 +89,29 @@ export class StorageService {
     } else {
       this.memory.authToken = token;
     }
+  }
+
+  getAuthSession(): PersistedAuthSession | null {
+    const raw = this.store?.get("authSession") ?? this.memory.authSession;
+    if (!raw || typeof raw !== "object") return null;
+    return {
+      ...EMPTY_SESSION,
+      ...raw,
+    };
+  }
+
+  setAuthSession(session: PersistedAuthSession | null): void {
+    if (this.store) {
+      this.store.set("authSession", session);
+      this.store.set("authToken", session?.accessToken ?? null);
+    } else {
+      this.memory.authSession = session;
+      this.memory.authToken = session?.accessToken ?? null;
+    }
+    log.info(`[StorageService] auth session ${session?.accessToken ? "saved" : "cleared"}`);
+  }
+
+  clearAuthSession(): void {
+    this.setAuthSession(null);
   }
 }

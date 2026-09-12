@@ -6,9 +6,10 @@ import type { MenuItemConstructorOptions } from "electron";
 import path from "path";
 import log from "electron-log/main";
 import { findExistingPath, getResourcesRoot, resolveAppIconPaths } from "../utils";
+import { createBrandIcon, type BrandTimerStatus } from "../utils/brand-icon";
 import { WindowRevealService } from "../services/window-reveal";
 
-type TrayTimerStatus = "idle" | "running" | "paused";
+export type TrayTimerStatus = BrandTimerStatus;
 
 type TrayUiState = {
   authenticated: boolean;
@@ -24,7 +25,11 @@ const trayState: TrayUiState = {
   timerStatus: "idle",
 };
 
-function loadTrayIcon(): Electron.NativeImage {
+function loadTrayIcon(status: TrayTimerStatus = trayState.timerStatus): Electron.NativeImage {
+  const brandSize = process.platform === "win32" ? 16 : 22;
+  const brand = createBrandIcon(status, brandSize);
+  if (!brand.isEmpty()) return brand;
+
   const root = getResourcesRoot();
   const candidates =
     process.platform === "win32"
@@ -149,6 +154,37 @@ export function updateTrayState(partial: Partial<TrayUiState>): void {
     trayState.timerStatus = partial.timerStatus;
   }
   rebuildMenu();
+  applyStatusIcons();
+}
+
+export function setTrayTimerStatus(status: TrayTimerStatus): void {
+  updateTrayState({ timerStatus: status });
+}
+
+function applyStatusIcons(): void {
+  const status = trayState.timerStatus;
+  try {
+    if (tray) {
+      const icon = loadTrayIcon(status);
+      if (!icon.isEmpty()) tray.setImage(icon);
+      tray.setToolTip(
+        status === "paused"
+          ? "Gr8r Time Tracker — Paused"
+          : status === "running"
+            ? "Gr8r Time Tracker — Tracking"
+            : "Gr8r Time Tracker",
+      );
+    }
+    const win = targetWindow();
+    if (win) {
+      const icon = createBrandIcon(status, 32);
+      if (!icon.isEmpty() && (process.platform === "win32" || process.platform === "linux")) {
+        win.setIcon(icon);
+      }
+    }
+  } catch (error) {
+    log.warn("[tray] failed to update status icon", error);
+  }
 }
 
 export function registerTrayIpc(): void {
@@ -166,9 +202,10 @@ export function registerTrayIpc(): void {
 export function createTray(mainWindow: BrowserWindow): Tray | null {
   try {
     mainWindowRef = mainWindow;
-    tray = new Tray(loadTrayIcon());
+    tray = new Tray(loadTrayIcon(trayState.timerStatus));
     tray.setToolTip("Gr8r Time Tracker");
     rebuildMenu();
+    applyStatusIcons();
 
     tray.on("double-click", () => showMainWindow(mainWindow));
     tray.on("click", () => {

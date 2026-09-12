@@ -13,7 +13,7 @@ import { ensureDeviceId, getApiBaseUrl } from "@/services/api/client";
 import { STORAGE_KEYS } from "@/constants/storage";
 import { normalizeAppName } from "@/lib/app-name";
 import { notifyToast } from "@/lib/notify";
-import { cancelWindowReveal } from "@/lib/window-reveal";
+import { cancelWindowReveal, scheduleWindowRevealAfterResume } from "@/lib/window-reveal";
 import { getElectronAPI, isElectron } from "@/services/electron";
 import { useAuthStore } from "@/store/auth.store";
 import { useSettingsStore } from "@/store/settings.store";
@@ -243,6 +243,44 @@ export function useTrackingAgent() {
       window.clearInterval(refreshId);
     };
   }, []);
+
+  // Idle auto-pause / auto-resume — must stay subscribed while the timer is paused.
+  useEffect(() => {
+    if (!isAuthenticated || !isElectron()) return;
+    const api = getElectronAPI();
+    if (!api?.tracking) return;
+
+    const unsubIdle = api.tracking.onIdleTimeout?.(() => {
+      if (useTimerStore.getState().timer.status !== "running") return;
+      void (async () => {
+        try {
+          const apiTimer = await timerApi.pause();
+          useTimerStore.getState().hydrateFromApi(apiTimer);
+          cancelWindowReveal();
+        } catch (err) {
+          console.warn("[tracking] idle auto-pause failed", err);
+        }
+      })();
+    });
+
+    const unsubResume = api.tracking.onIdleResume?.(() => {
+      if (useTimerStore.getState().timer.status !== "paused") return;
+      void (async () => {
+        try {
+          const apiTimer = await timerApi.resume();
+          useTimerStore.getState().hydrateFromApi(apiTimer);
+          scheduleWindowRevealAfterResume();
+        } catch (err) {
+          console.warn("[tracking] idle auto-resume failed", err);
+        }
+      })();
+    });
+
+    return () => {
+      unsubIdle?.();
+      unsubResume?.();
+    };
+  }, [isAuthenticated]);
 
   // Main-process screenshot agent while timer is running
   useEffect(() => {
