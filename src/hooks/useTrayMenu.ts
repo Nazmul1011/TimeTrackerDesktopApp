@@ -45,6 +45,21 @@ export function useTrayMenu() {
         void stopTimer();
         return;
       }
+      if (action === "stopAndQuit") {
+        void (async () => {
+          try {
+            await stopTimer({ silent: true });
+          } finally {
+            const api = getElectronAPI();
+            if (api?.app?.exit) {
+              await api.app.exit();
+            } else if (typeof window !== "undefined") {
+              window.close();
+            }
+          }
+        })();
+        return;
+      }
       if (action === "signOut") {
         void (async () => {
           await signOutSession();

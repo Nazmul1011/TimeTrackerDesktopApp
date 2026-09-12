@@ -91,4 +91,16 @@ export const timerApi = {
     >("/timer/reset-day");
     return data.data;
   },
+
+  /** Split the live session at midnight, saving yesterday and advancing start time to 00:00:00. */
+  async midnightSplit(occurredAt?: string) {
+    const { data } = await apiClient.post<
+      ApiResponse<{
+        split: boolean;
+        yesterdayEntry?: unknown;
+        runningTimer?: ApiTimer;
+      }>
+    >("/timer/midnight-split", occurredAt ? { occurredAt } : {});
+    return data.data;
+  },
 };

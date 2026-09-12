@@ -115,9 +115,25 @@ app.on("window-all-closed", () => {
   // Window is hidden to tray, not destroyed — do not quit here.
 });
 
-app.on("before-quit", () => {
-  isQuitting = true;
+let hasStoppedOnQuit = false;
+
+app.on("before-quit", (event) => {
   log.info("[main] Application quitting");
+  if (!hasStoppedOnQuit && mainWindow && !mainWindow.isDestroyed()) {
+    hasStoppedOnQuit = true;
+    isQuitting = true;
+    event.preventDefault();
+    try {
+      mainWindow.webContents.send("tray:command", { action: "stopAndQuit" });
+      setTimeout(() => {
+        app.exit(0);
+      }, 2500);
+    } catch {
+      app.exit(0);
+    }
+  } else {
+    isQuitting = true;
+  }
 });
 
 // Help TypeScript / tooling resolve resources path in packaged builds

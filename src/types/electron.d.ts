@@ -128,8 +128,13 @@ export interface ElectronAPI {
       timerStatus?: "idle" | "running" | "paused";
     }) => Promise<{ ok: boolean }>;
     onCommand: (
-      callback: (payload: { action?: "pause" | "resume" | "stop" | "signOut" }) => void,
+      callback: (payload: {
+        action?: "pause" | "resume" | "stop" | "signOut" | "stopAndQuit";
+      }) => void,
     ) => () => void;
+  };
+  app?: {
+    exit: () => Promise<void>;
   };
   window: {
     scheduleRevealAfterResume: (payload?: { delayMs?: number }) => Promise<{ ok: boolean }>;

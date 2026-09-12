@@ -106,6 +106,9 @@ const electronAPI = {
       return () => ipcRenderer.removeListener("tray:command", listener);
     },
   },
+  app: {
+    exit: () => ipcRenderer.invoke("app:exit"),
+  },
   // Platform helpers
   platform: process.platform,
   versions: {

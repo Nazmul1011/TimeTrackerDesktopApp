@@ -5,7 +5,8 @@
  */
 import { create } from "zustand";
 import type { ApiTimer } from "@/services/api/types";
-import { getOrgTimezone, todayInZone } from "@/lib/org-date";
+import { getOrgTimezone, todayInUserZone, todayInZone } from "@/lib/org-date";
+import { timerApi } from "@/services/api/timer.api";
 import { sanitizeProjectId } from "@/lib/project";
 import type { Timer, TimerStatus } from "@/types";
 
@@ -93,7 +94,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   segmentStartedAt: null,
   baseElapsedMs: 0,
   todayLoggedMs: 0,
-  todayDate: todayInZone(getOrgTimezone()),
+  todayDate: todayInUserZone(),
   sessionClockOnly: false,
   isSyncing: false,
 
@@ -154,12 +155,12 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     get().ensureToday();
     set({
       todayLoggedMs: Math.max(0, seconds) * 1000,
-      todayDate: todayInZone(getOrgTimezone()),
+      todayDate: todayInUserZone(),
     });
   },
 
   beginSessionClock: () => {
-    const today = todayInZone(getOrgTimezone());
+    const today = todayInUserZone();
     set({
       sessionClockOnly: true,
       todayLoggedMs: 0,
@@ -174,9 +175,38 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   },
 
   ensureToday: () => {
-    const today = todayInZone(getOrgTimezone());
+    const today = todayInUserZone();
     if (get().todayDate === today) return;
-    set({ todayDate: today, todayLoggedMs: 0, sessionClockOnly: false });
+    const { timer } = get();
+    if (timer.status === "running") {
+      set({
+        todayDate: today,
+        todayLoggedMs: 0,
+        sessionClockOnly: false,
+        baseElapsedMs: 0,
+        segmentStartedAt: Date.now(),
+        timer: {
+          ...timer,
+          elapsedMs: 0,
+        },
+      });
+      void timerApi.midnightSplit().catch(() => {});
+    } else if (timer.status === "paused") {
+      set({
+        todayDate: today,
+        todayLoggedMs: 0,
+        sessionClockOnly: false,
+        baseElapsedMs: 0,
+        segmentStartedAt: null,
+        timer: {
+          ...timer,
+          elapsedMs: 0,
+        },
+      });
+      void timerApi.midnightSplit().catch(() => {});
+    } else {
+      set({ todayDate: today, todayLoggedMs: 0, sessionClockOnly: false });
+    }
   },
 
   setSyncing: (isSyncing) => set({ isSyncing }),
@@ -204,7 +234,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     // Must stay pure: this is read during render. The day rollover is applied
     // by ensureToday() from the ticking effects, so a total carried over from
     // a previous day is ignored here instead of being written away mid-render.
-    const dayTotal = state.todayDate === todayInZone(getOrgTimezone()) ? state.todayLoggedMs : 0;
+    const dayTotal = state.todayDate === todayInUserZone() ? state.todayLoggedMs : 0;
     return dayTotal + sessionMs;
   },
 
@@ -216,7 +246,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
       segmentStartedAt: null,
       baseElapsedMs: 0,
       todayLoggedMs: 0,
-      todayDate: todayInZone(getOrgTimezone()),
+      todayDate: todayInUserZone(),
       sessionClockOnly: false,
       isSyncing: false,
     }),

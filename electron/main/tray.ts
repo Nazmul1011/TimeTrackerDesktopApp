@@ -15,7 +15,7 @@ type TrayUiState = {
   timerStatus: TrayTimerStatus;
 };
 
-type TrayCommand = "pause" | "resume" | "stop" | "signOut";
+type TrayCommand = "pause" | "resume" | "stop" | "signOut" | "stopAndQuit";
 
 let tray: Tray | null = null;
 let mainWindowRef: BrowserWindow | null = null;
@@ -122,7 +122,11 @@ function rebuildMenu(): void {
     {
       label: "Quit",
       click: () => {
-        app.quit();
+        if (trayState.timerStatus === "running" || trayState.timerStatus === "paused") {
+          sendCommand("stopAndQuit");
+        } else {
+          app.quit();
+        }
       },
     },
   ];
@@ -153,6 +157,9 @@ export function registerTrayIpc(): void {
       updateTrayState(payload);
     }
     return { ok: true };
+  });
+  ipcMain.handle("app:exit", () => {
+    app.exit(0);
   });
 }
 
