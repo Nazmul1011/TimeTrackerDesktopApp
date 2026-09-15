@@ -45,3 +45,4 @@ coverage/
 
 # Electron
 *.asar
+.dev-runtime/

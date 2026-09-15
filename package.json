@@ -20,7 +20,10 @@
     "verify:screenshot-compress": "npm run electron:compile && node dist-electron/services/screenshots/compress.verify.js",
     "electron": "npm run electron:compile && env -u ELECTRON_RUN_AS_NODE electron . --no-sandbox",
     "electron:dev": "npm run electron:compile && concurrently -k -n next,electron -c blue,magenta \"next dev -p 3000\" \"wait-on tcp:3000 && env -u ELECTRON_RUN_AS_NODE electron . --no-sandbox\"",
-    "electron:build": "npm run build && npm run electron:compile && env -u ELECTRON_RUN_AS_NODE electron-builder --linux AppImage deb",
+    "electron:build": "npm run build && npm run electron:compile && env -u ELECTRON_RUN_AS_NODE electron-builder",
+    "electron:build:mac": "npm run build && npm run electron:compile && env -u ELECTRON_RUN_AS_NODE electron-builder --mac dmg",
+    "electron:build:win": "npm run build && npm run electron:compile && env -u ELECTRON_RUN_AS_NODE electron-builder --win nsis",
+    "electron:build:linux": "npm run build && npm run electron:compile && env -u ELECTRON_RUN_AS_NODE electron-builder --linux AppImage deb",
     "prepare": "husky || true"
   },
   "dependencies": {
@@ -127,6 +130,9 @@
         "to": "resources"
       }
     ],
+    "win": {
+      "icon": "resources/icons/icon.ico"
+    },
     "linux": {
       "category": "Office",
       "icon": "icons",
@@ -134,6 +140,11 @@
       "target": [
         "AppImage"
       ]
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Nazmul1011",
+      "repo": "TimeTrackerDesktopApp"
     }
   }
 }
