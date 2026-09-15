@@ -531,7 +531,8 @@ export class TrackingService {
 
   private fireIdleResume() {
     if (!this.awaitingIdleResume) return;
-    if (Date.now() - this.lastIdleResumeEmitAt < 3_000) return;
+    this.awaitingIdleResume = false;
+    this.clearIdleResumeWatch();
     this.lastIdleResumeEmitAt = Date.now();
     log.info("[TrackingService] input after idle pause — requesting timer resume");
     const notifyResult = NotificationService.getInstance().showTimerIdleResumed();
