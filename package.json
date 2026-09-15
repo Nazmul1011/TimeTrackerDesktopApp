@@ -17,6 +17,8 @@
     "electron": "npm run electron:compile && npm run electron:icon && node scripts/launch-electron.cjs",
     "electron:dev": "npm run electron:compile && npm run electron:icon && concurrently -k -n next,electron -c blue,magenta \"next dev -p 3000\" \"wait-on tcp:3000 && node scripts/launch-electron.cjs\"",
     "electron:build": "npm run build && npm run electron:compile && env -u ELECTRON_RUN_AS_NODE electron-builder",
+    "electron:build:mac": "npm run build && npm run electron:compile && env -u ELECTRON_RUN_AS_NODE electron-builder --mac dmg",
+    "electron:publish:mac": "npm run build && npm run electron:compile && env -u ELECTRON_RUN_AS_NODE electron-builder --mac dmg --publish always",
     "prepare": "husky || true"
   },
   "dependencies": {
@@ -109,6 +111,10 @@
       "public/**/*",
       "package.json"
     ],
+    "asarUnpack": [
+      "**/*.{node,dylib,so,dll}",
+      "**/better-sqlite3/**"
+    ],
     "extraResources": [
       {
         "from": "resources",
@@ -121,7 +127,6 @@
       "identity": "Md shamir Rahman (7BK872D6A5)",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
-      "notarize": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
@@ -137,6 +142,12 @@
     },
     "win": {
       "icon": "resources/icons/icon.ico"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Nazmul1011",
+      "repo": "TimeTrackerDesktopApp",
+      "releaseType": "release"
     }
   }
 }

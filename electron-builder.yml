@@ -2,6 +2,7 @@
 appId: com.gr8r.timetracker
 productName: Gr8r Time Tracker
 copyright: Copyright © 2026 Gr8r
+author: Nazmul Rahman
 
 directories:
   output: release
@@ -13,6 +14,10 @@ files:
   - public/**/*
   - package.json
 
+asarUnpack:
+  - "**/*.{node,dylib,so,dll}"
+  - "**/better-sqlite3/**"
+
 extraResources:
   - from: resources
     to: resources
@@ -22,13 +27,12 @@ afterPack: ./scripts/after-pack-mac-icon.cjs
 mac:
   category: public.app-category.productivity
   target:
-    - dmg
-    - zip
+    - target: dmg
+      arch: arm64
   icon: resources/icons/icon.icns
   identity: "Md shamir Rahman (7BK872D6A5)"
   hardenedRuntime: true
   gatekeeperAssess: false
-  notarize: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
@@ -59,5 +63,7 @@ nsis:
   allowToChangeInstallationDirectory: true
 
 publish:
-  provider: generic
-  url: https://updates.gr8r.com/timetracker/
+  provider: github
+  owner: Nazmul1011
+  repo: TimeTrackerDesktopApp
+  releaseType: release
