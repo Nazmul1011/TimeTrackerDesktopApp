@@ -109,6 +109,15 @@ const electronAPI = {
   app: {
     exit: () => ipcRenderer.invoke("app:exit"),
   },
+  updater: {
+    onDownloaded: (callback: (payload: { version: string }) => void) => {
+      const listener = (_event: unknown, payload: { version: string }) => callback(payload);
+      ipcRenderer.on("updater:downloaded", listener);
+      return () => ipcRenderer.removeListener("updater:downloaded", listener);
+    },
+    install: () => ipcRenderer.invoke("updater:install"),
+    check: () => ipcRenderer.invoke("updater:check"),
+  },
   // Platform helpers
   platform: process.platform,
   versions: {
