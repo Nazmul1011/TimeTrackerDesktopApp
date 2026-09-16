@@ -648,10 +648,18 @@ export function TimerCard() {
           <div className="flex gap-2">
             <Button
               variant="outline"
-              className="h-9 rounded-lg px-4"
+              className="h-9 gap-1.5 rounded-lg px-4"
               disabled={isSyncing}
               onClick={() => void pause()}
             >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/figma/icon-pause.svg"
+                alt=""
+                className="size-3.5 dark:invert"
+                width={14}
+                height={14}
+              />
               Pause
             </Button>
             <Button
