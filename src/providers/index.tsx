@@ -11,6 +11,7 @@ import { TooltipProvider } from "./tooltip-provider";
 import { DialogProvider } from "./dialog-provider";
 import { TrackingAgentProvider } from "./tracking-agent-provider";
 import { AuthBootstrap } from "./auth-bootstrap";
+import { UpdateDialog } from "@/components/update-dialog";
 
 export function AppProviders({ children }: { children: ReactNode }) {
   return (
@@ -20,7 +21,10 @@ export function AppProviders({ children }: { children: ReactNode }) {
           <DialogProvider>
             <ToastProvider>
               <AuthBootstrap />
-              <TrackingAgentProvider>{children}</TrackingAgentProvider>
+              <TrackingAgentProvider>
+                {children}
+                <UpdateDialog />
+              </TrackingAgentProvider>
             </ToastProvider>
           </DialogProvider>
         </TooltipProvider>

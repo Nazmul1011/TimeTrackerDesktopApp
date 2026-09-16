@@ -151,6 +151,11 @@ export interface ElectronAPI {
   app?: {
     exit: () => Promise<void>;
   };
+  updater?: {
+    onDownloaded: (callback: (payload: { version: string }) => void) => () => void;
+    install: () => Promise<void>;
+    check: () => Promise<unknown>;
+  };
   window: {
     scheduleRevealAfterResume: (payload?: { delayMs?: number }) => Promise<{ ok: boolean }>;
     cancelReveal: () => Promise<{ ok: boolean }>;

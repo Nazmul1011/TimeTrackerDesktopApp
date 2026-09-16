@@ -3,7 +3,7 @@
  * Checks GitHub Releases on startup and every 2 hours.
  * Downloads silently and prompts/applies on quit or install.
  */
-import { BrowserWindow } from "electron";
+import { BrowserWindow, ipcMain } from "electron";
 import { autoUpdater } from "electron-updater";
 import log from "electron-log/main";
 
@@ -18,7 +18,7 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
 
   autoUpdater.on("update-available", (info) => {
     log.info("[updater] Update available", info.version);
-    mainWindow.webContents.send("updater:available", info);
+    mainWindow.webContents.send("updater:available", { version: info.version });
   });
 
   autoUpdater.on("update-not-available", () => {
@@ -31,12 +31,20 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
 
   autoUpdater.on("update-downloaded", (info) => {
     log.info("[updater] Update downloaded", info.version);
-    mainWindow.webContents.send("updater:downloaded", info);
-    autoUpdater.quitAndInstall(false, true);
+    mainWindow.webContents.send("updater:downloaded", { version: info.version });
   });
 
   autoUpdater.on("error", (err) => {
     log.error("[updater] Error", err);
+  });
+
+  ipcMain.handle("updater:install", () => {
+    log.info("[updater] User requested quit and install");
+    autoUpdater.quitAndInstall(false, true);
+  });
+
+  ipcMain.handle("updater:check", async () => {
+    return autoUpdater.checkForUpdatesAndNotify();
   });
 
   // Check on startup after 10s (app finishes loading first)
