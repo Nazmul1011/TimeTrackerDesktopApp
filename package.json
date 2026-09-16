@@ -1,6 +1,6 @@
 {
   "name": "gr8r-timetracker-desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Gr8r Time Tracker + HRM Desktop Client",
   "private": true,
   "main": "dist-electron/main/index.js",
@@ -15,8 +15,11 @@
     "electron:compile": "tsc -p tsconfig.electron.json",
     "electron:icon": "node scripts/ensure-dev-runtime.cjs",
     "electron": "npm run electron:compile && npm run electron:icon && node scripts/launch-electron.cjs",
-    "electron:dev": "npm run electron:compile && npm run electron:icon && concurrently -k -n next,electron -c blue,magenta \"next dev -p 3000\" \"wait-on tcp:3000 && node scripts/launch-electron.cjs\"",
     "electron:build": "npm run build && npm run electron:compile && node scripts/run-electron-builder.cjs",
+    "electron:build:win": "npm run build && npm run electron:compile && node scripts/run-electron-builder.cjs --win nsis",
+    "electron:publish:win": "npm run build && npm run electron:compile && node scripts/run-electron-builder.cjs --win nsis --publish always",
+    "electron:build:mac": "npm run build && npm run electron:compile && node scripts/run-electron-builder.cjs --mac dmg zip",
+    "electron:publish:mac": "npm run build && npm run electron:compile && node scripts/run-electron-builder.cjs --mac dmg zip --publish always",
     "prepare": "husky || true"
   },
   "dependencies": {
@@ -111,6 +114,10 @@
       "public/**/*",
       "package.json"
     ],
+    "asarUnpack": [
+      "**/*.{node,dylib,so,dll}",
+      "**/better-sqlite3/**"
+    ],
     "extraResources": [
       {
         "from": "resources",
@@ -123,7 +130,6 @@
       "identity": "Md shamir Rahman (7BK872D6A5)",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
-      "notarize": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
@@ -139,6 +145,11 @@
     },
     "win": {
       "icon": "resources/icons/icon.ico"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Nazmul1011",
+      "repo": "TimeTrackerDesktopApp"
     }
   }
 }

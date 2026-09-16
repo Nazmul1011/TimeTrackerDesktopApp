@@ -3,6 +3,7 @@
  */
 import { toast } from "sonner";
 import { formatElapsed } from "@/lib/dayjs";
+import { notifyToast } from "@/lib/notify";
 import { sanitizeProjectId } from "@/lib/project";
 import { dispatchTimerStopped } from "@/lib/timer-events";
 import { cancelWindowReveal, scheduleWindowRevealAfterResume } from "@/lib/window-reveal";
@@ -42,10 +43,12 @@ export async function pauseTimer(): Promise<void> {
       const apiTimer = await timerApi.pause();
       useTimerStore.getState().hydrateFromApi(apiTimer);
       cancelWindowReveal();
+      notifyToast("warning", "Timer paused. Click Resume when you are ready to continue.");
       if (isElectron()) {
+        void getElectronAPI()?.tracking.disarmIdleResume?.();
         void getElectronAPI()?.notification?.show?.({
           title: "Timer paused",
-          body: "Timer paused. Resume when you are back.",
+          body: "Timer paused. Click Resume when you are ready to continue.",
         });
       }
     } catch (err) {
@@ -61,6 +64,13 @@ export async function resumeTimer(): Promise<void> {
       const apiTimer = await timerApi.resume();
       useTimerStore.getState().hydrateFromApi(apiTimer);
       scheduleWindowRevealAfterResume();
+      notifyToast("success", "Timer resumed. Tracking is running.");
+      if (isElectron()) {
+        void getElectronAPI()?.notification?.show?.({
+          title: "Timer resumed",
+          body: "Timer resumed. Tracking is running.",
+        });
+      }
     } catch (err) {
       toast.error(getErrorMessage(err, "Failed to resume timer"));
     }

@@ -67,8 +67,7 @@ export class NotificationService {
     const safeTitle = title || "Gr8r Time Tracker";
     const safeBody = body || "";
 
-    // Notification Center is unreliable for unsigned Electron on macOS (banner
-    // is accepted then never shown). Always draw our own on-screen banner.
+    // Always draw our own on-screen banner & play sound
     this.showOverlayBanner(safeTitle, safeBody);
     this.playAlertSound();
 
@@ -251,12 +250,19 @@ $notifier.Show($toast)
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;");
 
-    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    let targetDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    const mainWin = BrowserWindow.getAllWindows().find(
+      (w) => w !== this.overlay && !w.isDestroyed() && w.isVisible(),
+    );
+    if (mainWin) {
+      targetDisplay = screen.getDisplayMatching(mainWin.getBounds());
+    }
+
     const width = 370;
     const height = 82;
     const gap = 16;
-    const x = Math.round(display.workArea.x + display.workArea.width - width - gap);
-    const y = Math.round(display.workArea.y + gap);
+    const x = Math.round(targetDisplay.workArea.x + targetDisplay.workArea.width - width - gap);
+    const y = Math.round(targetDisplay.workArea.y + gap);
 
     const win = new BrowserWindow({
       width,
@@ -267,7 +273,7 @@ $notifier.Show($toast)
       transparent: true,
       backgroundColor: "#00000000",
       resizable: false,
-      movable: true,
+      movable: false,
       minimizable: false,
       maximizable: false,
       fullscreenable: false,
@@ -277,7 +283,6 @@ $notifier.Show($toast)
       show: false,
       hasShadow: false,
       roundedCorners: true,
-      ...(process.platform === "darwin" ? { type: "panel" as const } : {}),
       title: "gr8r-idle-toast",
       webPreferences: {
         sandbox: false,
@@ -287,7 +292,7 @@ $notifier.Show($toast)
     });
 
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    win.setAlwaysOnTop(true, "screen-saver");
+    win.setAlwaysOnTop(true, "floating");
 
     const titleLower = (title || "").toLowerCase();
     const bodyLower = (body || "").toLowerCase();
@@ -492,10 +497,18 @@ $notifier.Show($toast)
     height: 12px;
   }
 </style>
+<script>
+  function dismissBanner() {
+    try { window.location.href = "custom://close"; } catch(e) {}
+  }
+  function revealApp() {
+    try { window.location.href = "custom://reveal"; } catch(e) {}
+  }
+</script>
 </head>
 <body>
   <div class="wrapper">
-    <div class="card" onclick="window.close()">
+    <div class="card" onclick="revealApp()">
       <div class="status-icon ${statusClass}">
         ${statusIconSvg}
       </div>
@@ -503,7 +516,7 @@ $notifier.Show($toast)
         <div class="title">${escapeHtml(title)}</div>
         <div class="body">${escapeHtml(body)}</div>
       </div>
-      <button class="close-btn" onclick="event.stopPropagation(); window.close();" aria-label="Close">
+      <button class="close-btn" onclick="event.stopPropagation(); dismissBanner();" aria-label="Close">
         <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
           <path d="M2 2l8 8M10 2l-8 8"/>
         </svg>
@@ -517,23 +530,38 @@ $notifier.Show($toast)
       if (this.overlay === win) this.overlay = null;
     });
 
+    win.webContents.on("will-navigate", (event, url) => {
+      if (url.startsWith("custom://close")) {
+        event.preventDefault();
+        this.closeOverlay();
+      } else if (url.startsWith("custom://reveal")) {
+        event.preventDefault();
+        this.closeOverlay();
+        WindowRevealService.getInstance().revealNow();
+      }
+    });
+
+    const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+
     void (async () => {
       try {
-        await win.loadURL("about:blank");
-        await win.webContents.executeJavaScript(
-          `document.open();document.write(${JSON.stringify(html)});document.close();`,
-        );
+        await win.loadURL(dataUrl);
         if (win.isDestroyed()) return;
         win.showInactive();
         win.moveTop();
-        log.info("[NotificationService] on-screen banner visible", { title });
+        log.info("[NotificationService] on-screen banner visible", {
+          title,
+          x,
+          y,
+          displayId: targetDisplay.id,
+        });
       } catch (error) {
         log.warn("[NotificationService] on-screen banner failed", error);
       }
     })();
 
     this.overlay = win;
-    this.overlayTimer = setTimeout(() => this.closeOverlay(), 12_000);
+    this.overlayTimer = setTimeout(() => this.closeOverlay(), 7_000);
   }
 
   private playAlertSound() {

@@ -615,7 +615,7 @@ export function TimerCard() {
 
       <div className="mt-8 flex flex-col items-center gap-4 pb-2">
         <div className="relative flex items-center justify-center">
-          {(displayMs > 0 || isRunning || isPaused) && (
+          {/* {(displayMs > 0 || isRunning || isPaused) && (
             <button
               type="button"
               aria-label="Reset today's time"
@@ -626,7 +626,7 @@ export function TimerCard() {
             >
               <RotateCcw className="size-4" strokeWidth={2} />
             </button>
-          )}
+          )} */}
           <p className="text-[32px] font-medium tabular-nums leading-[34px] tracking-wide text-black dark:text-white">
             {display}
           </p>
@@ -648,10 +648,18 @@ export function TimerCard() {
           <div className="flex gap-2">
             <Button
               variant="outline"
-              className="h-9 rounded-lg px-4"
+              className="h-9 gap-1.5 rounded-lg px-4"
               disabled={isSyncing}
               onClick={() => void pause()}
             >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/figma/icon-pause.svg"
+                alt=""
+                className="size-3.5 dark:invert"
+                width={14}
+                height={14}
+              />
               Pause
             </Button>
             <Button
@@ -726,14 +734,18 @@ export function TimerCard() {
           const live =
             day.isToday && (isRunning || isPaused) ? Math.floor(timer.elapsedMs / 1000) : 0;
           const daySeconds = (weekDailyTotals[day.ymd] ?? 0) + live;
+          const isTimerActiveToday = day.isToday && (isRunning || isPaused);
+          const isPastDay = day.ymd < (todayDate || "");
+          const isUnderEightHours = isPastDay && daySeconds < 8 * 3600;
+
           return (
             <div
               key={day.ymd}
               ref={day.isToday ? todayCardRef : undefined}
               className={cn(
                 "flex min-w-[102px] shrink-0 flex-col items-start gap-1.5 rounded-2xl border bg-white px-3 py-2 transition-colors dark:bg-[#1e293b]",
-                day.isToday
-                  ? "border-[#ededed] shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:border-[#334155]"
+                isTimerActiveToday
+                  ? "border-[#2b7fff] shadow-[0_0_0_1px_#2b7fff] dark:border-[#2b7fff]"
                   : "border-[#ededed] dark:border-[#334155]",
               )}
             >
@@ -745,7 +757,19 @@ export function TimerCard() {
                   {day.monthDay}
                 </span>
               </div>
-              <div className="rounded-md bg-[#f5f5f5] px-2 py-0.5 text-xs font-medium tabular-nums text-[#1e2939] dark:bg-[#334155] dark:text-[#f1f5f9]">
+              <div
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium tabular-nums",
+                  isTimerActiveToday
+                    ? "bg-[#eff6ff] text-[#1e2939] dark:bg-[#1e293b] dark:text-[#f1f5f9]"
+                    : isUnderEightHours
+                      ? "bg-[#fef2f2] text-[#f4323c] dark:bg-red-950/40 dark:text-red-400"
+                      : "bg-[#f5f5f5] text-[#1e2939] dark:bg-[#334155] dark:text-[#f1f5f9]",
+                )}
+              >
+                {isTimerActiveToday && (
+                  <span className="size-1.5 shrink-0 rounded-full bg-[#2b7fff]" />
+                )}
                 {formatElapsed(daySeconds * 1000)}
               </div>
             </div>
@@ -753,7 +777,7 @@ export function TimerCard() {
         })}
       </div>
 
-      <Dialog open={resetConfirmOpen} onOpenChange={setResetConfirmOpen}>
+      {/* <Dialog open={resetConfirmOpen} onOpenChange={setResetConfirmOpen}>
         <DialogContent className="max-w-[340px] rounded-2xl p-5">
           <DialogHeader className="gap-1.5 text-left">
             <DialogTitle className="text-base font-semibold text-[#1e2939] dark:text-[#f1f5f9]">
@@ -786,7 +810,7 @@ export function TimerCard() {
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </Dialog> */}
     </section>
   );
 }
