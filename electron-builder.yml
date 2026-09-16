@@ -29,6 +29,8 @@ mac:
   target:
     - target: dmg
       arch: arm64
+    - target: zip
+      arch: arm64
   icon: resources/icons/icon.icns
   identity: "Md shamir Rahman (7BK872D6A5)"
   hardenedRuntime: true
@@ -66,4 +68,3 @@ publish:
   provider: github
   owner: Nazmul1011
   repo: TimeTrackerDesktopApp
-  releaseType: release
