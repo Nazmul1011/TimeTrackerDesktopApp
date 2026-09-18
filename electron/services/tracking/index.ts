@@ -7,9 +7,11 @@ import log from "electron-log/main";
 import { ScreenshotService } from "../screenshots";
 import { ActivityService } from "../activity";
 import { InputActivityMonitor } from "../input-activity";
+import { IdleService } from "../idle";
 import { NotificationService } from "../notifications";
 import { WindowRevealService } from "../window-reveal";
 import { MacPermissions } from "../mac-permissions";
+import { getMainApiBaseUrl } from "../../api-url";
 
 export type TrackingAuth = {
   accessToken: string;
@@ -37,7 +39,7 @@ export class TrackingService {
     screenshotIntervalMs: 5 * 60_000,
     enableScreenshots: true,
     firstScreenshotDelayMs: 3_000,
-    idleTimeoutMs: 1 * 60_000,
+    idleTimeoutMs: 2 * 60_000,
   };
   private screenshotTimer: NodeJS.Timeout | null = null;
   private firstShotTimer: NodeJS.Timeout | null = null;
@@ -45,6 +47,10 @@ export class TrackingService {
   private capturing = false;
   private authWaiters: Array<(ok: boolean) => void> = [];
   private idlePauseInFlight = false;
+  /** After idle auto-pause, wait for mouse/keyboard then resume (not manual Pause). */
+  private awaitingIdleResume = false;
+  private idleResumeTimer: NodeJS.Timeout | null = null;
+  private lastIdleResumeEmitAt = 0;
   private scheduleRevealOnNextStart = false;
   private lastCaptureAt = 0;
 
@@ -66,7 +72,7 @@ export class TrackingService {
       organizationId: "",
       deviceId: "desktop",
       sessionToken: null,
-      apiBaseUrl: "http://localhost:3001",
+      apiBaseUrl: getMainApiBaseUrl(),
     };
 
     if (auth.accessToken) next.accessToken = auth.accessToken;
@@ -85,6 +91,12 @@ export class TrackingService {
   }
 
   start(auth: TrackingAuth, options?: Partial<TrackingOptions>) {
+    if (this.awaitingIdleResume) {
+      log.info("[TrackingService] start ignored — waiting for idle auto-resume");
+      this.updateAuth(auth);
+      return { ok: true, intervalMs: this.options.screenshotIntervalMs };
+    }
+
     if (this.stopTimer) {
       clearTimeout(this.stopTimer);
       this.stopTimer = null;
@@ -92,6 +104,8 @@ export class TrackingService {
 
     this.stopTimersOnly();
     this.updateAuth(auth);
+    MacPermissions.clearCaptureBlock();
+    ScreenshotService.getInstance().resetWarnings();
     this.options = {
       screenshotIntervalMs: Math.max(60_000, options?.screenshotIntervalMs ?? 5 * 60_000),
       enableScreenshots: options?.enableScreenshots !== false,
@@ -103,18 +117,7 @@ export class TrackingService {
     };
     this.running = true;
     this.idlePauseInFlight = false;
-
-    if (process.platform === "darwin" && this.options.enableScreenshots) {
-      // Await probe so the first screenshot is more likely after TCC prompt.
-      void (async () => {
-        const ok = await MacPermissions.ensureScreenRecording();
-        if (!ok) {
-          log.warn(
-            "[TrackingService] macOS Screen Recording denied — screenshots will fail until enabled in System Settings and the app is restarted",
-          );
-        }
-      })();
-    }
+    this.disarmIdleResume();
 
     ActivityService.getInstance().start();
     const idleMs = this.options.idleTimeoutMs ?? 0;
@@ -128,13 +131,7 @@ export class TrackingService {
     );
 
     if (this.options.enableScreenshots) {
-      this.firstShotTimer = setTimeout(() => {
-        void this.captureAndUpload();
-      }, this.options.firstScreenshotDelayMs);
-
-      this.screenshotTimer = setInterval(() => {
-        void this.captureAndUpload();
-      }, this.options.screenshotIntervalMs);
+      void this.startScreenshotLoopWhenAllowed();
     }
 
     log.info(
@@ -153,7 +150,24 @@ export class TrackingService {
     return { ok: true, intervalMs: this.options.screenshotIntervalMs };
   }
 
+  retryScreenshots() {
+    MacPermissions.clearCaptureBlock();
+    ScreenshotService.getInstance().resetWarnings();
+    if (!this.running || !this.options.enableScreenshots) {
+      return { ok: false, message: "Start the timer first" };
+    }
+    this.stopTimersOnly();
+    void this.startScreenshotLoopWhenAllowed();
+    log.info("[TrackingService] screenshot capture retried");
+    return { ok: true };
+  }
+
   stop() {
+    if (this.awaitingIdleResume) {
+      log.info("[TrackingService] stop ignored — waiting for idle auto-resume");
+      return { ok: true };
+    }
+
     if (this.stopTimer) {
       clearTimeout(this.stopTimer);
     }
@@ -165,12 +179,54 @@ export class TrackingService {
       this.stopTimersOnly();
       InputActivityMonitor.getInstance().stop();
       ActivityService.getInstance().stop();
+      if (this.awaitingIdleResume) {
+        this.startIdleResumeWatch();
+      } else {
+        this.clearIdleResumeWatch();
+      }
       log.info("[TrackingService] stopped");
     }, 2000);
     return { ok: true };
   }
 
+  private screenshotLoopGen = 0;
+
+  private async startScreenshotLoopWhenAllowed(): Promise<void> {
+    const gen = this.screenshotLoopGen;
+    if (process.platform === "darwin") {
+      const ok = await MacPermissions.requestScreenRecordingOnce();
+      if (!ok) {
+        log.warn(
+          "[TrackingService] Screen Recording not granted — screenshots paused until you enable Gr8r Time Tracker in System Settings and fully quit the app",
+        );
+        this.emitToRenderer("screenshot:failed", {
+          message: "Screen Recording not granted",
+        });
+        return;
+      }
+    }
+    if (gen !== this.screenshotLoopGen || !this.running || !this.options.enableScreenshots) {
+      return;
+    }
+    this.firstShotTimer = setTimeout(() => {
+      void this.captureAndUpload().then((result) => {
+        if (
+          !result.ok ||
+          gen !== this.screenshotLoopGen ||
+          !this.running ||
+          !this.options.enableScreenshots
+        ) {
+          return;
+        }
+        this.screenshotTimer = setInterval(() => {
+          void this.captureAndUpload();
+        }, this.options.screenshotIntervalMs);
+      });
+    }, this.options.firstScreenshotDelayMs);
+  }
+
   private stopTimersOnly() {
+    this.screenshotLoopGen += 1;
     if (this.screenshotTimer) {
       clearInterval(this.screenshotTimer);
       this.screenshotTimer = null;
@@ -198,11 +254,21 @@ export class TrackingService {
     this.capturing = true;
     try {
       let shot = await ScreenshotService.getInstance().capture();
-      if (!shot?.buffer?.length) {
+      if (!shot?.buffer?.length && process.platform !== "darwin") {
         await new Promise((resolve) => setTimeout(resolve, 1500));
         shot = await ScreenshotService.getInstance().capture();
       }
       if (!shot?.buffer?.length) {
+        if (process.platform === "darwin") {
+          MacPermissions.markCaptureFailed();
+          this.stopTimersOnly();
+          const message = "Screen Recording not granted";
+          log.warn(
+            "[TrackingService] capture failed — screenshots paused until Screen Recording is on and the app is fully quit",
+          );
+          this.emitToRenderer("screenshot:failed", { message });
+          return { ok: false, message };
+        }
         const message = "Screenshot capture failed";
         log.warn(`[TrackingService] ${message}`);
         this.emitToRenderer("screenshot:failed", { message });
@@ -431,15 +497,55 @@ export class TrackingService {
     }
 
     this.scheduleRevealOnNextStart = true;
+    this.running = false;
+    this.awaitingIdleResume = true;
+    InputActivityMonitor.getInstance().stop();
+    ActivityService.getInstance().stop();
+    this.startIdleResumeWatch();
 
     this.emitToRenderer("tracking:idle-timeout", {
       intervalMs: idleMs,
       activityPercent: InputActivityMonitor.getInstance().peekPercent(),
     });
+  }
 
-    this.running = false;
-    InputActivityMonitor.getInstance().stop();
-    ActivityService.getInstance().stop();
+  /** Cancel auto-resume (Stop, logout, or a manual Pause that was never idle). */
+  disarmIdleResume() {
+    this.awaitingIdleResume = false;
+    this.lastIdleResumeEmitAt = 0;
+    this.clearIdleResumeWatch();
+  }
+
+  private startIdleResumeWatch() {
+    this.clearIdleResumeWatch();
+    IdleService.getInstance().startWatching();
+    // Capture after startWatching so the seed lastInputAt is not treated as the user coming back.
+    const baseline = Date.now();
+    this.idleResumeTimer = setInterval(() => {
+      if (!this.awaitingIdleResume) return;
+      if (!IdleService.getInstance().inputOccurredAfter(baseline)) return;
+      this.fireIdleResume();
+    }, 250);
+    log.info("[TrackingService] watching for mouse/keyboard to auto-resume after idle pause");
+  }
+
+  private fireIdleResume() {
+    if (!this.awaitingIdleResume) return;
+    if (Date.now() - this.lastIdleResumeEmitAt < 3_000) return;
+    this.lastIdleResumeEmitAt = Date.now();
+    log.info("[TrackingService] input after idle pause — requesting timer resume");
+    const notifyResult = NotificationService.getInstance().showTimerIdleResumed();
+    if (!notifyResult.ok) {
+      log.warn("[TrackingService] resume notification failed", notifyResult.message);
+    }
+    this.emitToRenderer("tracking:idle-resume", {});
+  }
+
+  private clearIdleResumeWatch() {
+    if (this.idleResumeTimer) {
+      clearInterval(this.idleResumeTimer);
+      this.idleResumeTimer = null;
+    }
   }
 
   private emitToRenderer(channel: string, payload: unknown) {

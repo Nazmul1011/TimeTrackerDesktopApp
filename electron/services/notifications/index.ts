@@ -6,7 +6,7 @@ import { execFile } from "child_process";
 import fs from "fs";
 import path from "path";
 import { promisify } from "util";
-import { app, nativeImage, Notification } from "electron";
+import { app, BrowserWindow, nativeImage, Notification, screen, shell } from "electron";
 import log from "electron-log/main";
 import { SettingsService } from "../settings";
 import { WindowRevealService } from "../window-reveal";
@@ -19,6 +19,8 @@ export class NotificationService {
 
   /** Keep references until closed — otherwise GC can drop the toast. */
   private active: Notification[] = [];
+  private overlay: BrowserWindow | null = null;
+  private overlayTimer: NodeJS.Timeout | null = null;
 
   static getInstance(): NotificationService {
     if (!NotificationService.instance) {
@@ -38,8 +40,17 @@ export class NotificationService {
           }`;
     return this.show(
       "Timer paused",
-      `No mouse or keyboard activity for ${duration}. Your timer has been paused.`,
+      `No mouse or keyboard activity for ${duration}. Timer paused — it will resume when you move the mouse or press a key.`,
       { urgency: "critical" },
+    );
+  }
+
+  /** Desktop alert when idle auto-pause ends and tracking starts again. */
+  showTimerIdleResumed(): { ok: boolean; message?: string } {
+    return this.show(
+      "Timer started",
+      "Activity detected — idle pause removed. The timer is running again.",
+      { urgency: "normal" },
     );
   }
 
@@ -55,6 +66,16 @@ export class NotificationService {
 
     const safeTitle = title || "Gr8r Time Tracker";
     const safeBody = body || "";
+
+    // Notification Center is unreliable for unsigned Electron on macOS (banner
+    // is accepted then never shown). Always draw our own on-screen banner.
+    this.showOverlayBanner(safeTitle, safeBody);
+    this.playAlertSound();
+
+    // On macOS, display our custom branded overlay banner only (prevents duplicate system banner).
+    if (process.platform === "darwin") {
+      return { ok: true };
+    }
 
     if (Notification.isSupported()) {
       const electronResult = this.showElectron(safeTitle, safeBody, options);
@@ -72,11 +93,6 @@ export class NotificationService {
 
     if (process.platform === "win32") {
       void this.showWindowsToastFallback(safeTitle, safeBody);
-      return { ok: true };
-    }
-
-    if (process.platform === "darwin") {
-      void this.showMacOsascriptFallback(safeTitle, safeBody);
       return { ok: true };
     }
 
@@ -111,7 +127,7 @@ export class NotificationService {
       });
       notification.on("close", cleanup);
       notification.on("failed", (_event, error) => {
-        log.warn("[NotificationService] notification failed event", error);
+        log.warn("[NotificationService] Notification Center rejected the banner", error);
         cleanup();
         if (process.platform === "linux") {
           void this.showLinuxNotifySend(title, body, options?.urgency);
@@ -123,13 +139,6 @@ export class NotificationService {
       });
 
       notification.show();
-      if (process.platform === "darwin") {
-        try {
-          app.dock?.bounce("critical");
-        } catch {
-          // ignore
-        }
-      }
       log.info("[NotificationService] shown via Electron", { title, body });
       return { ok: true };
     } catch (error) {
@@ -168,11 +177,6 @@ export class NotificationService {
       const escapeAs = (value: string) => value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
       const script = `display notification "${escapeAs(body)}" with title "${escapeAs(title)}" sound name "Glass"`;
       await execFileAsync("osascript", ["-e", script], { timeout: 3000 });
-      try {
-        app.dock?.bounce("critical");
-      } catch {
-        // ignore
-      }
       log.info("[NotificationService] shown via osascript", { title, body });
       return true;
     } catch (error) {
@@ -229,6 +233,355 @@ $notifier.Show($toast)
     } catch (error) {
       log.warn("[NotificationService] Windows toast fallback failed", error);
       return false;
+    }
+  }
+
+  /**
+   * Always-on-top banner that does not go through Notification Center.
+   * Unsigned Electron on macOS is allowed to "show" a system toast, then macOS
+   * never draws it — this is what the user actually sees.
+   */
+  private showOverlayBanner(title: string, body: string) {
+    this.closeOverlay();
+
+    const escapeHtml = (value: string) =>
+      value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+
+    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    const width = 370;
+    const height = 82;
+    const gap = 16;
+    const x = Math.round(display.workArea.x + display.workArea.width - width - gap);
+    const y = Math.round(display.workArea.y + gap);
+
+    const win = new BrowserWindow({
+      width,
+      height,
+      x,
+      y,
+      frame: false,
+      transparent: true,
+      backgroundColor: "#00000000",
+      resizable: false,
+      movable: true,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      focusable: false,
+      alwaysOnTop: true,
+      show: false,
+      hasShadow: false,
+      roundedCorners: true,
+      ...(process.platform === "darwin" ? { type: "panel" as const } : {}),
+      title: "gr8r-idle-toast",
+      webPreferences: {
+        sandbox: false,
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    win.setAlwaysOnTop(true, "screen-saver");
+
+    const titleLower = (title || "").toLowerCase();
+    const bodyLower = (body || "").toLowerCase();
+    const isPaused = titleLower.includes("pause") || bodyLower.includes("pause");
+    const isResumed =
+      titleLower.includes("start") ||
+      titleLower.includes("resume") ||
+      bodyLower.includes("resume") ||
+      bodyLower.includes("running");
+    const isStopped = titleLower.includes("stop") || bodyLower.includes("stop");
+
+    let statusClass = "info";
+    let statusIconSvg = `
+      <div class="inner-circle">
+        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <circle cx="6" cy="6" r="4.5"/>
+          <path d="M6 5.5v3M6 3.5h.01"/>
+        </svg>
+      </div>`;
+
+    if (isPaused) {
+      statusClass = "paused";
+      statusIconSvg = `
+        <div class="inner-circle">
+          <svg viewBox="0 0 12 12" fill="currentColor">
+            <rect x="3.2" y="2.8" width="1.8" height="6.4" rx="0.9"/>
+            <rect x="7" y="2.8" width="1.8" height="6.4" rx="0.9"/>
+          </svg>
+        </div>`;
+    } else if (isResumed) {
+      statusClass = "active";
+      statusIconSvg = `
+        <div class="inner-circle">
+          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2.5 6.5l2.5 2.5 4.5-5"/>
+          </svg>
+        </div>`;
+    } else if (isStopped) {
+      statusClass = "stopped";
+      statusIconSvg = `
+        <div class="inner-circle">
+          <svg viewBox="0 0 12 12" fill="currentColor">
+            <rect x="3" y="3" width="6" height="6" rx="1.2"/>
+          </svg>
+        </div>`;
+    }
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  }
+  .wrapper {
+    width: 100%;
+    height: 100%;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .card {
+    width: 100%;
+    height: 100%;
+    background: #0c111d;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 14px 30px -4px rgba(0, 0, 0, 0.65), 0 4px 12px rgba(0, 0, 0, 0.4);
+    border-radius: 12px;
+    padding: 10px 12px;
+    color: #fff;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    cursor: pointer;
+    transition: border-color 0.2s ease;
+  }
+  .card:hover {
+    border-color: rgba(255, 255, 255, 0.16);
+  }
+  /* Concentric circle status icon */
+  .status-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+  }
+  .status-icon.active {
+    background: rgba(16, 185, 129, 0.12);
+    border: 2px solid rgba(16, 185, 129, 0.22);
+    color: #10b981;
+  }
+  .status-icon.active .inner-circle {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1.5px solid #10b981;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .status-icon.paused {
+    background: rgba(245, 158, 11, 0.12);
+    border: 2px solid rgba(245, 158, 11, 0.22);
+    color: #f59e0b;
+  }
+  .status-icon.paused .inner-circle {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1.5px solid #f59e0b;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .status-icon.stopped {
+    background: rgba(239, 68, 68, 0.12);
+    border: 2px solid rgba(239, 68, 68, 0.22);
+    color: #ef4444;
+  }
+  .status-icon.stopped .inner-circle {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1.5px solid #ef4444;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .status-icon.info {
+    background: rgba(43, 127, 255, 0.12);
+    border: 2px solid rgba(43, 127, 255, 0.22);
+    color: #2b7fff;
+  }
+  .status-icon.info .inner-circle {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1.5px solid #2b7fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .status-icon svg {
+    width: 10px;
+    height: 10px;
+  }
+  .content {
+    flex: 1;
+    min-width: 0;
+  }
+  .title {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #ffffff;
+    letter-spacing: -0.01em;
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .body {
+    margin-top: 3px;
+    font-size: 11.5px;
+    line-height: 1.35;
+    color: #94a3b8;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .close-btn {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    background: transparent;
+    border: none;
+    color: #64748b;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s ease, background 0.15s ease;
+    margin-right: -2px;
+  }
+  .close-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #f1f5f9;
+  }
+  .close-btn svg {
+    width: 12px;
+    height: 12px;
+  }
+</style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="card" onclick="window.close()">
+      <div class="status-icon ${statusClass}">
+        ${statusIconSvg}
+      </div>
+      <div class="content">
+        <div class="title">${escapeHtml(title)}</div>
+        <div class="body">${escapeHtml(body)}</div>
+      </div>
+      <button class="close-btn" onclick="event.stopPropagation(); window.close();" aria-label="Close">
+        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <path d="M2 2l8 8M10 2l-8 8"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    win.on("closed", () => {
+      if (this.overlay === win) this.overlay = null;
+    });
+
+    void (async () => {
+      try {
+        await win.loadURL("about:blank");
+        await win.webContents.executeJavaScript(
+          `document.open();document.write(${JSON.stringify(html)});document.close();`,
+        );
+        if (win.isDestroyed()) return;
+        win.showInactive();
+        win.moveTop();
+        log.info("[NotificationService] on-screen banner visible", { title });
+      } catch (error) {
+        log.warn("[NotificationService] on-screen banner failed", error);
+      }
+    })();
+
+    this.overlay = win;
+    this.overlayTimer = setTimeout(() => this.closeOverlay(), 12_000);
+  }
+
+  private playAlertSound() {
+    if (process.platform === "darwin") {
+      void execFileAsync("afplay", ["/System/Library/Sounds/Glass.aiff"], {
+        timeout: 4000,
+      }).catch((error) => {
+        log.warn("[NotificationService] afplay failed", error);
+        try {
+          shell.beep();
+        } catch {
+          // ignore
+        }
+      });
+      return;
+    }
+    try {
+      shell.beep();
+    } catch {
+      // ignore
+    }
+  }
+
+  private closeOverlay() {
+    if (this.overlayTimer) {
+      clearTimeout(this.overlayTimer);
+      this.overlayTimer = null;
+    }
+    if (this.overlay && !this.overlay.isDestroyed()) {
+      this.overlay.close();
+    }
+    this.overlay = null;
+  }
+
+  private brandIconDataUrl(): string | null {
+    const logoSvg = path.join(app.getAppPath(), "public", "figma", "logo.svg");
+    const file = (fs.existsSync(logoSvg) ? logoSvg : null) ?? this.resolveIconPath();
+    if (!file) return null;
+    try {
+      const buf = fs.readFileSync(file);
+      const mime = file.endsWith(".svg")
+        ? "image/svg+xml"
+        : file.endsWith(".ico")
+          ? "image/x-icon"
+          : "image/png";
+      return `data:${mime};base64,${buf.toString("base64")}`;
+    } catch {
+      return null;
     }
   }
 

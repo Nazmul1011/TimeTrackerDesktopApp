@@ -19,6 +19,7 @@ import { useTimer } from "@/hooks/useTimer";
 import { projectsApi, type ApiProject } from "@/services/api/projects.api";
 import { timesheetApi } from "@/services/api/timesheet.api";
 import { useAuthStore } from "@/store/auth.store";
+import { useTimerStore } from "@/store/timer.store";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,6 +29,7 @@ import {
 import { FigmaGlyph } from "@/components/icons/figma-glyph";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+// import { RotateCw } from "lucide-react";
 import { toast } from "sonner";
 
 function apiErrorMessage(err: unknown, fallback: string): string {
@@ -56,10 +58,13 @@ export function TimerCard() {
     isPaused,
     isIdle,
     isSyncing,
+    display,
+    displayMs,
     start,
     stop,
     pause,
     resume,
+    selectProject,
     setProject,
   } = useTimer();
 
@@ -97,10 +102,16 @@ export function TimerCard() {
     }
   }, [organizationId, orgTimezone]);
 
+  const todayDate = useTimerStore((s) => s.todayDate);
+
   useEffect(() => {
     void loadProjects();
+  }, [loadProjects]);
+
+  useEffect(() => {
+    setSecondsByProject({});
     void loadTodayByProject();
-  }, [loadProjects, loadTodayByProject]);
+  }, [todayDate, loadTodayByProject]);
 
   useEffect(() => {
     if (!selectedProjectId) return;
@@ -169,9 +180,6 @@ export function TimerCard() {
     timer.projectId,
   ]);
 
-  // The headline clock tracks the selected project, not the whole day.
-  const projectDisplay = formatElapsed(projectSeconds * 1000);
-
   // The day it is in the org's timezone — the day the data below covers.
   const dateLabel = weekdayLabelInZone(orgTimezone);
   const dateShort = monthDayLabelInZone(orgTimezone);
@@ -200,7 +208,7 @@ export function TimerCard() {
         clientName: clientName.trim() || undefined,
       });
       setProjects((prev) => [created, ...prev]);
-      setProject(created.id);
+      await selectProject(created.id);
       resetCreateForm();
       setMenuOpen(false);
       toast.success("Project created");
@@ -262,7 +270,7 @@ export function TimerCard() {
                 return (
                   <DropdownMenuItem
                     onClick={() => {
-                      setProject(null);
+                      void selectProject(null);
                       resetCreateForm();
                     }}
                     className={cn(
@@ -306,7 +314,7 @@ export function TimerCard() {
                   <DropdownMenuItem
                     key={p.id}
                     onClick={() => {
-                      setProject(p.id);
+                      void selectProject(p.id);
                       resetCreateForm();
                     }}
                     className={cn(
@@ -474,27 +482,34 @@ export function TimerCard() {
       </div>
 
       <div className="mt-8 flex flex-col items-center gap-4 pb-2">
-        <p className="text-[32px] font-medium tabular-nums leading-[34px] tracking-wide text-black">
-          {projectDisplay}
-        </p>
-        {isIdle && projectSeconds > 0 && (
-          <p className="text-[11px] text-[#99a1af]">Today · {displayName}</p>
-        )}
+        <div className="flex items-center gap-2">
+          <p className="text-[32px] font-medium tabular-nums leading-[34px] tracking-wide text-black">
+            {display}
+          </p>
+          {/* Reset / restart is disabled.
+          {(isRunning || isPaused) && (
+            <button
+              type="button"
+              aria-label="Restart timer"
+              title="Restart timer"
+              disabled={isSyncing}
+              className="flex size-8 shrink-0 items-center justify-center rounded-full text-[#6a7282] outline-none transition-colors hover:bg-[#f5f5f5] hover:text-[#1e2939] focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35 disabled:opacity-50"
+              onClick={() => void restart()}
+            >
+              <RotateCw className="size-4" strokeWidth={2} />
+            </button>
+          )}
+          */}
+        </div>
+        {isIdle && displayMs > 0 && <p className="text-[11px] text-[#99a1af]">Today</p>}
 
         {isIdle && (
           <Button
-            className="h-9 gap-1 rounded-lg bg-[#2b7fff] px-5 text-sm font-medium text-white hover:bg-[#1a6aef]"
+            className="h-9 gap-1.5 rounded-lg bg-[#2b7fff] px-5 text-sm font-medium leading-5 text-white shadow-none hover:bg-[#1a6aef]"
             disabled={isSyncing}
             onClick={() => void start(selectedProjectId)}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/figma/icon-play.svg"
-              alt=""
-              className="size-4 brightness-0 invert"
-              width={16}
-              height={16}
-            />
+            <FigmaGlyph src="/figma/icon-play.svg" size={16} />
             {isSyncing ? "Starting…" : "Start"}
           </Button>
         )}

@@ -105,7 +105,7 @@
     },
     "files": [
       "dist-electron/**/*",
-      ".next/**/*",
+      "out/**/*",
       "public/**/*",
       "package.json"
     ],
@@ -118,13 +118,22 @@
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "resources/icons/icon.icns",
+      "identity": "Md shamir Rahman (7BK872D6A5)",
       "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "notarize": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
         "NSAppleEventsUsageDescription": "Gr8r Time Tracker needs Automation access to detect which application you are using while the timer is running.",
-        "NSScreenCaptureDescription": "Gr8r Time Tracker needs Screen Recording permission to capture work screenshots while the timer is running."
+        "NSScreenCaptureUsageDescription": "Gr8r Time Tracker needs Screen Recording permission to capture work screenshots while the timer is running.",
+        "NSUserNotificationsUsageDescription": "Gr8r Time Tracker sends a notification when the timer pauses because you were idle."
       }
+    },
+    "afterPack": "./scripts/after-pack-mac-icon.cjs",
+    "dmg": {
+      "icon": "resources/icons/icon.icns",
+      "iconSize": 80
     },
     "win": {
       "icon": "resources/icons/icon.ico"

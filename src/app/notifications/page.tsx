@@ -9,9 +9,7 @@ import { toast } from "sonner";
 import { FigmaGlyph } from "@/components/icons/figma-glyph";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { ROUTES } from "@/constants/routes";
-import { useNotificationNavigation } from "@/hooks/useNotificationNavigation";
 import { useNotifications } from "@/hooks/useNotifications";
 import { dayjs } from "@/lib/dayjs";
 import {
@@ -73,7 +71,11 @@ function InboxItem({
           <button
             type="button"
             className="text-[11px] font-medium text-[var(--brand)]"
-            onClick={() => onMarkRead(notification.id)}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onMarkRead(notification.id);
+            }}
           >
             Mark as read
           </button>
@@ -83,7 +85,11 @@ function InboxItem({
         <button
           type="button"
           className="text-[11px] text-[var(--text-muted)] hover:text-[#1e2939]"
-          onClick={() => onDismiss(notification.id)}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onDismiss(notification.id);
+          }}
         >
           Dismiss
         </button>
@@ -107,11 +113,10 @@ export default function NotificationsPage() {
     markAllAsRead,
     deleteNotification,
   } = useNotifications({ poll: true, pollList: true });
-  const { navigateFromNotification } = useNotificationNavigation();
 
+  // Stay on this page — only update read state, do not route to Home.
   const handleOpenNotification = (notification: AppNotification) => {
     if (!notification.read) void markAsRead(notification.id);
-    navigateFromNotification(notification.actionUrl);
   };
 
   useEffect(() => {
@@ -194,7 +199,7 @@ export default function NotificationsPage() {
                 {
                   idleTimeoutMinutes: checked ? DEFAULT_IDLE_TIMEOUT_MINUTES : 0,
                 },
-                checked ? "Idle detection on (3 min)" : "Idle detection off",
+                checked ? "Idle detection on (2 min)" : "Idle detection off",
               );
             }}
           />
@@ -219,7 +224,7 @@ export default function NotificationsPage() {
             ) : null}
           </div>
 
-          <ScrollArea className="h-[280px] pr-2">
+          <div className="scrollbar-hide h-[280px] overflow-y-auto">
             {isLoading && notifications.length === 0 ? (
               <p className="py-6 text-center text-xs text-[var(--text-muted)]">Loading…</p>
             ) : error && notifications.length === 0 ? (
@@ -251,7 +256,7 @@ export default function NotificationsPage() {
                 ))}
               </ul>
             )}
-          </ScrollArea>
+          </div>
         </div>
       </div>
 

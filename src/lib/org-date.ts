@@ -30,6 +30,11 @@ export function getOrgTimezone(): string | null {
   return organizations.find((o) => o.id === organizationId)?.timezone ?? null;
 }
 
+/** Local IANA timezone of the user's computer/device. */
+export function getUserTimezone(): string {
+  return deviceZone();
+}
+
 /** `YYYY-MM-DD` for `date` as seen in `timeZone`. */
 export function ymdInZone(date: Date, timeZone?: string | null): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -42,6 +47,11 @@ export function ymdInZone(date: Date, timeZone?: string | null): string {
 
 export function todayInZone(timeZone?: string | null): string {
   return ymdInZone(new Date(), timeZone);
+}
+
+/** `YYYY-MM-DD` in the user's local timezone (anchors 12:00 AM daily rollover to the employee's clock). */
+export function todayInUserZone(): string {
+  return ymdInZone(new Date(), deviceZone());
 }
 
 // Calendar arithmetic runs on a UTC-anchored date so the device offset can

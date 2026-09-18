@@ -34,9 +34,7 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
   const [imgFailed, setImgFailed] = useState(false);
 
   const activityLabel =
-    typeof item.activityPercent === "number"
-      ? formatActivityPercent(item.activityPercent)
-      : null;
+    typeof item.activityPercent === "number" ? formatActivityPercent(item.activityPercent) : null;
 
   return (
     <div className="relative overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-white p-1">
@@ -62,7 +60,7 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
           <img
             src={item.imageUrl}
             alt={item.appName || "Screenshot"}
-            className="size-full object-cover"
+            className="size-full bg-[var(--surface-elevated)] object-contain"
             referrerPolicy="no-referrer"
             onError={() => setImgFailed(true)}
           />
@@ -146,10 +144,7 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              disabled={item.deleteRequested}
-              onClick={() => setShowDelete(true)}
-            >
+            <DropdownMenuItem disabled={item.deleteRequested} onClick={() => setShowDelete(true)}>
               {item.deleteRequested ? "Deletion pending" : "Request to delete"}
             </DropdownMenuItem>
             {item.imageUrl ? (

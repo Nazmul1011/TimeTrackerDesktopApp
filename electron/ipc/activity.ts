@@ -13,7 +13,7 @@ export function registerActivityIpc(): void {
   const icons = AppIconService.getInstance();
 
   ipcMain.handle("activity:getIdleState", async (_event, thresholdSeconds?: number) => {
-    return idle.getIdleState(typeof thresholdSeconds === "number" ? thresholdSeconds : 180);
+    return idle.getIdleState(typeof thresholdSeconds === "number" ? thresholdSeconds : 120);
   });
 
   ipcMain.handle("activity:getActiveWindow", async () => {

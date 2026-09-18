@@ -6,6 +6,7 @@ import { app, BrowserWindow, nativeImage, shell } from "electron";
 import path from "path";
 import log from "electron-log/main";
 import { findExistingPath, resolveAppIconPaths } from "../utils";
+import { startRendererServer } from "./renderer-server";
 
 async function waitForRenderer(url: string, attempts = 40): Promise<void> {
   for (let i = 0; i < attempts; i++) {
@@ -28,9 +29,13 @@ export function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 446,
     height: 640,
-    minWidth: 400,
-    minHeight: 520,
-    maxWidth: 520,
+    minWidth: 446,
+    minHeight: 640,
+    maxWidth: 446,
+    maxHeight: 640,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
     show: false,
     title: "Gr8r Time Tracker",
     backgroundColor: "#f9fafb",
@@ -65,14 +70,18 @@ export function createMainWindow(): BrowserWindow {
   });
 
   const isDev = !app.isPackaged;
-  const rendererUrl = process.env.ELECTRON_RENDERER_URL || "http://localhost:3000";
-  const startUrl = `${rendererUrl.replace(/\/$/, "")}/home`;
 
   void (async () => {
     try {
+      let startUrl: string;
       if (isDev) {
+        const rendererUrl = process.env.ELECTRON_RENDERER_URL || "http://localhost:3000";
+        startUrl = `${rendererUrl.replace(/\/$/, "")}/home`;
         log.info(`[window] Waiting for renderer: ${startUrl}`);
         await waitForRenderer(startUrl);
+      } else {
+        const { port } = await startRendererServer();
+        startUrl = `http://127.0.0.1:${port}/home/`;
       }
       log.info(`[window] Loading renderer: ${startUrl}`);
       await win.loadURL(startUrl);

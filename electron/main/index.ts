@@ -20,6 +20,22 @@ import { SettingsService } from "../services/settings";
 import { WindowRevealService } from "../services/window-reveal";
 import { AppIconService, registerAppIconScheme } from "../services/app-icon";
 
+if (process.platform === "darwin") {
+  // Must run before app.whenReady(). ScreenCaptureKit pickers re-prompt
+  // "record screen and audio" even when Screen Recording is already on.
+  app.commandLine.appendSwitch(
+    "disable-features",
+    [
+      "ScreenCaptureKitPickerScreen",
+      "ScreenCaptureKitStreamPickerSonoma",
+      "ScreenCaptureKitStreamPickerVentura",
+      "UseSCContentSharingPicker",
+      "ThumbnailCapturerMac:capture_mode/sc_screenshot_manager",
+      "MacCatapLoopbackAudioForScreenShare",
+    ].join(","),
+  );
+}
+
 loadEnv();
 
 // Custom icon protocol must be registered before app is ready.
@@ -84,11 +100,14 @@ app.whenReady().then(() => {
   void bootstrap();
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    if (!mainWindow || mainWindow.isDestroyed()) {
       mainWindow = createMainWindow();
-    } else {
-      WindowRevealService.getInstance().revealNow();
+      return;
     }
+    // Do not go through WindowRevealService — steal-focus + dock.show blanks the tile.
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    if (!mainWindow.isVisible()) mainWindow.show();
+    mainWindow.focus();
   });
 });
 
@@ -96,9 +115,25 @@ app.on("window-all-closed", () => {
   // Window is hidden to tray, not destroyed — do not quit here.
 });
 
-app.on("before-quit", () => {
-  isQuitting = true;
+let hasStoppedOnQuit = false;
+
+app.on("before-quit", (event) => {
   log.info("[main] Application quitting");
+  if (!hasStoppedOnQuit && mainWindow && !mainWindow.isDestroyed()) {
+    hasStoppedOnQuit = true;
+    isQuitting = true;
+    event.preventDefault();
+    try {
+      mainWindow.webContents.send("tray:command", { action: "stopAndQuit" });
+      setTimeout(() => {
+        app.exit(0);
+      }, 2500);
+    } catch {
+      app.exit(0);
+    }
+  } else {
+    isQuitting = true;
+  }
 });
 
 // Help TypeScript / tooling resolve resources path in packaged builds

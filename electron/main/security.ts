@@ -9,9 +9,12 @@ export function applySecurityDefaults(): void {
   // Disable navigation to unexpected origins from the renderer
   app.on("web-contents-created", (_event, contents) => {
     contents.on("will-navigate", (event, navigationUrl) => {
-      const allowed = process.env.ELECTRON_RENDERER_URL || "http://localhost:3000";
       try {
         const parsed = new URL(navigationUrl);
+        if (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost") {
+          return;
+        }
+        const allowed = process.env.ELECTRON_RENDERER_URL || "http://localhost:3000";
         const allowedOrigin = new URL(allowed).origin;
         if (parsed.origin !== allowedOrigin && parsed.protocol !== "file:") {
           log.warn("[security] Blocked navigation to", navigationUrl);

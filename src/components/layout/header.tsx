@@ -19,26 +19,15 @@ import { ROUTES } from "@/constants/routes";
 import { useNotificationNavigation } from "@/hooks/useNotificationNavigation";
 import { useNotifications } from "@/hooks/useNotifications";
 import { cn } from "@/lib/utils";
-import { authApi } from "@/services/api/auth.api";
-import { disconnectRealtime } from "@/services/realtime/socket";
-import { useAuthStore } from "@/store/auth.store";
-import { useTimerStore } from "@/store/timer.store";
+import { signOutSession } from "@/lib/session";
 
 const headerIconClass =
   "inline-flex size-8 shrink-0 items-center justify-center rounded-lg p-2 outline-none transition-colors duration-150 hover:bg-[#f5f5f5] focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35 active:bg-[#efefef]";
 
 export function Header() {
   const router = useRouter();
-  const clearSession = useAuthStore((s) => s.clearSession);
-  const resetTimer = useTimerStore((s) => s.reset);
-  const {
-    notifications,
-    unreadCount,
-    isLoading,
-    error,
-    loadNotifications,
-    markAsRead,
-  } = useNotifications({ poll: true });
+  const { notifications, unreadCount, isLoading, error, loadNotifications, markAsRead } =
+    useNotifications({ poll: true });
   const { navigateFromNotification } = useNotificationNavigation();
 
   useEffect(() => {
@@ -46,14 +35,8 @@ export function Header() {
   }, [loadNotifications]);
 
   const handleSignOut = async () => {
-    try {
-      await authApi.logout();
-    } finally {
-      disconnectRealtime();
-      resetTimer();
-      clearSession();
-      router.push(ROUTES.LOGIN);
-    }
+    await signOutSession();
+    router.push(ROUTES.LOGIN);
   };
 
   return (
@@ -89,18 +72,12 @@ export function Header() {
                 "cursor-pointer border border-[#ededed] bg-white hover:border-[#e6e6e6] data-[state=open]:bg-[#f5f5f5]",
               )}
               aria-label={
-                unreadCount > 0
-                  ? `Notifications, ${unreadCount} unread`
-                  : "Notifications"
+                unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"
               }
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={
-                  unreadCount > 0
-                    ? "/figma/icon-bell-unread.svg"
-                    : "/figma/icon-bell.svg"
-                }
+                src={unreadCount > 0 ? "/figma/icon-bell-unread.svg" : "/figma/icon-bell.svg"}
                 alt=""
                 className="size-4 object-contain"
                 width={16}
@@ -111,12 +88,10 @@ export function Header() {
           <DropdownMenuContent
             align="end"
             sideOffset={8}
-            className="w-[281px] min-w-[281px] max-h-[360px] overflow-y-auto overflow-x-hidden rounded-xl border border-[#e6e6e6] bg-white p-0 shadow-[0_1px_1px_rgba(0,0,0,0.03),0_4px_2px_rgba(0,0,0,0.03),0_9px_2.5px_rgba(0,0,0,0.02)]"
+            className="scrollbar-hide max-h-[360px] w-[281px] min-w-[281px] overflow-y-auto overflow-x-hidden rounded-xl border border-[#e6e6e6] bg-white p-0 shadow-[0_1px_1px_rgba(0,0,0,0.03),0_4px_2px_rgba(0,0,0,0.03),0_9px_2.5px_rgba(0,0,0,0.02)]"
           >
             {isLoading && notifications.length === 0 ? (
-              <div className="px-3 py-6 text-center text-xs text-[#99a1af]">
-                Loading…
-              </div>
+              <div className="px-3 py-6 text-center text-xs text-[#99a1af]">Loading…</div>
             ) : error && notifications.length === 0 ? (
               <div className="flex flex-col items-center gap-2 px-3 py-6">
                 <p className="text-center text-xs text-[#99a1af]">{error}</p>
@@ -171,13 +146,8 @@ export function Header() {
               />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            className="w-44 rounded-lg border-[#ededed]"
-          >
-            <DropdownMenuItem onClick={() => router.push(ROUTES.PROFILE)}>
-              Profile
-            </DropdownMenuItem>
+          <DropdownMenuContent align="end" className="w-44 rounded-lg border-[#ededed]">
+            <DropdownMenuItem onClick={() => router.push(ROUTES.PROFILE)}>Profile</DropdownMenuItem>
             <DropdownMenuItem onClick={() => router.push(ROUTES.SETTINGS)}>
               Settings
             </DropdownMenuItem>
@@ -185,9 +155,7 @@ export function Header() {
               Notifications
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => void handleSignOut()}>
-              Sign out
-            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void handleSignOut()}>Sign out</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

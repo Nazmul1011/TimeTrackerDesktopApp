@@ -20,4 +20,6 @@ export const IPC_CHANNELS = {
   SETTINGS_SET: "settings:set",
   SYNC_RUN: "sync:run",
   SYNC_GET_STATUS: "sync:getStatus",
+  TRAY_SET_STATE: "tray:setState",
+  TRAY_COMMAND: "tray:command",
 } as const;

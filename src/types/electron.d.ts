@@ -77,6 +77,10 @@ export interface ElectronAPI {
     onIdleTimeout: (
       callback: (payload?: { intervalMs?: number; activityPercent?: number }) => void,
     ) => () => void;
+    onIdleResume: (callback: (payload?: unknown) => void) => () => void;
+    disarmIdleResume: () => Promise<{ ok: boolean }>;
+    openScreenRecording: () => Promise<{ ok: boolean }>;
+    retryScreenshots: () => Promise<{ ok: boolean; message?: string }>;
   };
   notification: {
     show: (payload: {
@@ -117,6 +121,20 @@ export interface ElectronAPI {
   sync: {
     run: () => Promise<unknown>;
     getStatus: () => Promise<unknown>;
+  };
+  tray: {
+    setState: (payload: {
+      authenticated?: boolean;
+      timerStatus?: "idle" | "running" | "paused";
+    }) => Promise<{ ok: boolean }>;
+    onCommand: (
+      callback: (payload: {
+        action?: "pause" | "resume" | "stop" | "signOut" | "stopAndQuit";
+      }) => void,
+    ) => () => void;
+  };
+  app?: {
+    exit: () => Promise<void>;
   };
   window: {
     scheduleRevealAfterResume: (payload?: { delayMs?: number }) => Promise<{ ok: boolean }>;

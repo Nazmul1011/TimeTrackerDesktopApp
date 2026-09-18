@@ -1,9 +1,8 @@
 /**
  * Screenshot capture via Electron desktopCapturer, with OS CLI fallbacks.
- * Multiple monitors are stitched into one image (virtual-desktop layout).
  * macOS requires Screen Recording permission (TCC) for both paths.
  */
-import { desktopCapturer, nativeImage, screen, type Display } from "electron";
+import { desktopCapturer, nativeImage, screen, type Display, type NativeImage } from "electron";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import fs from "fs/promises";
@@ -27,8 +26,8 @@ const THUMB_SIZES = [
   { width: 800, height: 450 },
 ] as const;
 
-/** Cap stitched output so 3×4K desks stay uploadable. */
-const MAX_STITCH_EDGE = 3840;
+/** Longest edge of a stitched multi-monitor image (fits laptop + external). */
+const STITCH_MAX_EDGE = 5120;
 
 const EXEC_ENV = {
   ...process.env,
@@ -48,41 +47,39 @@ export class ScreenshotService {
     return ScreenshotService.instance;
   }
 
+  resetWarnings(): void {
+    this.macPermissionWarned = false;
+  }
+
   async capture(): Promise<CapturedScreenshot | null> {
     const capturedAt = new Date().toISOString();
 
     if (process.platform === "darwin") {
-      // Probe / log TCC status. Always attempt capture — first call triggers the prompt.
-      const allowed = await MacPermissions.ensureScreenRecording();
-      if (!allowed && !this.macPermissionWarned) {
-        this.macPermissionWarned = true;
-        log.warn(
-          "[ScreenshotService] Screen Recording denied — enable it in System Settings → Privacy & Security → Screen Recording for Electron/Gr8r, then fully quit and reopen the app",
-        );
-        void MacPermissions.openScreenRecordingSettings();
-      }
+      await MacPermissions.ensureScreenRecording();
     }
 
     const isWayland = Boolean(process.env.WAYLAND_DISPLAY);
     const order = isWayland ? (["cli", "electron"] as const) : (["electron", "cli"] as const);
 
     for (const method of order) {
+      if (process.platform === "darwin" && method === "cli") {
+        if (!MacPermissions.canUseCliFallback()) continue;
+        MacPermissions.markCliUsed();
+      }
       const shot =
         method === "electron" ? await this.captureViaDesktopCapturer() : await this.captureViaCli();
       if (shot?.buffer?.length) {
+        MacPermissions.markCaptureSucceeded();
         log.info(`[ScreenshotService] captured via ${method}`, shot.width, "x", shot.height);
         return { ...shot, capturedAt };
       }
     }
 
     if (process.platform === "darwin" && !this.macPermissionWarned) {
-      const status = MacPermissions.getScreenStatus();
-      if (status !== "granted") {
-        this.macPermissionWarned = true;
-        log.warn(
-          `[ScreenshotService] capture failed (screen status=${status}) — grant Screen Recording and restart`,
-        );
-      }
+      this.macPermissionWarned = true;
+      log.warn(
+        `[ScreenshotService] capture failed (screen status=${MacPermissions.getScreenStatus()})`,
+      );
     }
 
     log.error("[ScreenshotService] All capture methods failed");
@@ -95,15 +92,36 @@ export class ScreenshotService {
   > | null> {
     try {
       const displays = screen.getAllDisplays();
-      if (displays.length > 1) {
-        const stitched = await this.captureAllDisplaysStitched(displays);
-        if (stitched) return stitched;
-        log.warn(
-          "[ScreenshotService] multi-display stitch failed — trying CLI full-desktop fallback",
-        );
+      const thumb = stitchThumbnailSize(displays);
+      const sources = await desktopCapturer.getSources({
+        types: ["screen"],
+        thumbnailSize: thumb,
+        fetchWindowIcons: false,
+      });
+      const usable = usableSources(sources);
+      if (!usable.length) {
+        log.warn("[ScreenshotService] desktopCapturer returned empty thumbnail");
         return null;
       }
-      return await this.capturePrimaryDisplay();
+
+      if (displays.length > 1) {
+        const stitched = stitchFromSources(displays, usable);
+        if (stitched) return stitched;
+        log.warn("[ScreenshotService] stitch failed — falling back to primary display");
+      }
+
+      const primary = screen.getPrimaryDisplay();
+      const preferred =
+        usable.find(({ source }) => source.display_id === String(primary.id)) ??
+        usable.sort((a, b) => b.size.width * b.size.height - a.size.width * a.size.height)[0];
+      if (!preferred) return null;
+      const png = preferred.source.thumbnail.toPNG();
+      if (!png.length) return null;
+      return {
+        buffer: png,
+        width: preferred.size.width,
+        height: preferred.size.height,
+      };
     } catch (error) {
       log.warn("[ScreenshotService] desktopCapturer failed", error);
       return null;
@@ -118,150 +136,143 @@ export class ScreenshotService {
     for (const max of THUMB_SIZES) {
       const thumbWidth = Math.min(Math.floor(width * scale), max.width);
       const thumbHeight = Math.min(Math.floor(height * scale), max.height);
-      const image = await this.captureDisplayThumbnail(primary, {
-        width: thumbWidth,
-        height: thumbHeight,
+      const sources = await desktopCapturer.getSources({
+        types: ["screen"],
+        thumbnailSize: { width: thumbWidth, height: thumbHeight },
+        fetchWindowIcons: false,
       });
-      if (!image) continue;
-      const size = image.getSize();
-      const png = image.toPNG();
+
+      const ranked = usableSources(sources).sort(
+        (a, b) => b.size.width * b.size.height - a.size.width * a.size.height,
+      );
+
+      const preferred =
+        ranked.find(({ source }) => source.display_id === String(primary.id)) ?? ranked[0];
+
+      if (!preferred) continue;
+
+      const png = preferred.source.thumbnail.toPNG();
       if (!png.length) continue;
-      return { buffer: png, width: size.width, height: size.height };
+
+      return {
+        buffer: png,
+        width: preferred.size.width,
+        height: preferred.size.height,
+      };
     }
 
     log.warn("[ScreenshotService] desktopCapturer returned empty thumbnail");
     return null;
   }
 
-  /**
-   * Capture every monitor and stitch into one image in virtual-desktop layout.
-   * Gaps (uneven arrangements) stay black.
-   */
   private async captureAllDisplaysStitched(
     displays: Display[],
   ): Promise<Omit<CapturedScreenshot, "capturedAt"> | null> {
-    const layers: Array<{
-      image: Electron.NativeImage;
-      destX: number;
-      destY: number;
-      destW: number;
-      destH: number;
-    }> = [];
-
-    const minX = Math.min(...displays.map((d) => d.bounds.x));
-    const minY = Math.min(...displays.map((d) => d.bounds.y));
-    const outW = Math.round(Math.max(...displays.map((d) => d.bounds.x + d.bounds.width)) - minX);
-    const outH = Math.round(Math.max(...displays.map((d) => d.bounds.y + d.bounds.height)) - minY);
-    if (outW < 32 || outH < 32) return null;
-
-    const fit = Math.min(1, MAX_STITCH_EDGE / outW, MAX_STITCH_EDGE / outH);
-
-    for (const display of displays) {
-      const scale = Math.min(display.scaleFactor || 1, 2);
-      const thumbW = Math.min(Math.floor(display.size.width * scale), THUMB_SIZES[0].width);
-      const thumbH = Math.min(Math.floor(display.size.height * scale), THUMB_SIZES[0].height);
-      const image = await this.captureDisplayThumbnail(display, {
-        width: Math.max(32, thumbW),
-        height: Math.max(32, thumbH),
-      });
-      if (!image) {
-        log.warn(`[ScreenshotService] skipped display ${display.id} — empty capture`);
-        continue;
-      }
-      layers.push({
-        image,
-        destX: Math.round((display.bounds.x - minX) * fit),
-        destY: Math.round((display.bounds.y - minY) * fit),
-        destW: Math.max(1, Math.round(display.bounds.width * fit)),
-        destH: Math.max(1, Math.round(display.bounds.height * fit)),
-      });
-    }
-
-    if (layers.length === 0) return null;
-
-    const canvasW = Math.max(1, Math.round(outW * fit));
-    const canvasH = Math.max(1, Math.round(outH * fit));
-    const png = this.stitchNativeImages(layers, canvasW, canvasH);
-    if (!png?.length) return null;
-
-    log.info(
-      `[ScreenshotService] stitched ${layers.length}/${displays.length} displays into ${canvasW}x${canvasH}`,
-    );
-    return { buffer: png, width: canvasW, height: canvasH };
-  }
-
-  private async captureDisplayThumbnail(
-    display: Display,
-    thumbnailSize: { width: number; height: number },
-  ): Promise<Electron.NativeImage | null> {
+    const thumb = stitchThumbnailSize(displays);
     const sources = await desktopCapturer.getSources({
       types: ["screen"],
-      thumbnailSize,
+      thumbnailSize: thumb,
       fetchWindowIcons: false,
     });
 
-    const usable = sources.filter(
-      (source) =>
-        source.thumbnail &&
-        !source.thumbnail.isEmpty() &&
-        (source.thumbnail.getSize().width ?? 0) >= 32 &&
-        (source.thumbnail.getSize().height ?? 0) >= 32,
+    const usable = usableSources(sources);
+    if (!usable.length) return null;
+
+    const used = new Set<string>();
+    const tiles: StitchTile[] = [];
+
+    for (const display of displays) {
+      const match =
+        usable.find(
+          ({ source }) => !used.has(source.id) && source.display_id === String(display.id),
+        ) ?? usable.find(({ source }) => !used.has(source.id));
+      if (!match) continue;
+      used.add(match.source.id);
+      tiles.push({ display, image: match.source.thumbnail });
+    }
+
+    if (tiles.length < 2) return null;
+
+    const stitched = stitchDisplayTiles(tiles);
+    if (!stitched) return null;
+
+    log.info(
+      `[ScreenshotService] stitched ${tiles.length} displays into ${stitched.width}x${stitched.height}`,
     );
-
-    const byId = usable.find((source) => source.display_id === String(display.id));
-    if (byId) return byId.thumbnail;
-
-    const displays = screen.getAllDisplays();
-    const index = displays.findIndex((d) => d.id === display.id);
-    if (index >= 0 && usable[index]) return usable[index].thumbnail;
-
-    return usable.length === 1 ? (usable[0]?.thumbnail ?? null) : null;
+    return stitched;
   }
 
-  private stitchNativeImages(
-    layers: Array<{
-      image: Electron.NativeImage;
-      destX: number;
-      destY: number;
-      destW: number;
-      destH: number;
-    }>,
-    outW: number,
-    outH: number,
-  ): Buffer | null {
-    try {
-      const out = Buffer.alloc(outW * outH * 4, 0);
-      for (const layer of layers) {
-        const resized = layer.image.resize({
-          width: layer.destW,
-          height: layer.destH,
-        });
-        if (resized.isEmpty()) continue;
-        const { width: srcW, height: srcH } = resized.getSize();
-        const bitmap = resized.toBitmap();
-        for (let y = 0; y < srcH; y += 1) {
-          const dy = layer.destY + y;
-          if (dy < 0 || dy >= outH) continue;
-          const srcStart = y * srcW * 4;
-          const dstStart = (dy * outW + layer.destX) * 4;
-          const copyW = Math.min(srcW, outW - layer.destX);
-          if (copyW <= 0 || layer.destX >= outW) continue;
-          const srcEnd = srcStart + copyW * 4;
-          if (srcEnd > bitmap.length) continue;
-          bitmap.copy(out, dstStart, srcStart, srcEnd);
-        }
+  /**
+   * macOS default `screencapture` is main display only. Capture each screen
+   * with -D and stitch using the real arrangement.
+   */
+  private async captureMacAllDisplays(): Promise<Omit<CapturedScreenshot, "capturedAt"> | null> {
+    const displays = screen.getAllDisplays();
+    if (!displays.length) return null;
+
+    const images: Array<{ image: NativeImage; index: number }> = [];
+    for (let i = 1; i <= displays.length; i += 1) {
+      const tmpPath = path.join(
+        os.tmpdir(),
+        `gr8r-screenshot-${process.pid}-d${i}-${Date.now()}.png`,
+      );
+      try {
+        await execFileAsync(
+          "/usr/sbin/screencapture",
+          ["-x", "-t", "png", "-D", String(i), tmpPath],
+          { timeout: 120_000, env: EXEC_ENV },
+        );
+        const buffer = await fs.readFile(tmpPath);
+        void fs.unlink(tmpPath).catch(() => undefined);
+        if (buffer.length < 100) continue;
+        const image = nativeImage.createFromBuffer(buffer);
+        if (!image || image.isEmpty()) continue;
+        images.push({ image, index: i });
+      } catch (error) {
+        const err = error as { message?: string };
+        log.warn(`[ScreenshotService] screencapture -D ${i} failed: ${err.message || error}`);
+        void fs.unlink(tmpPath).catch(() => undefined);
       }
-      const composed = nativeImage.createFromBitmap(out, {
-        width: outW,
-        height: outH,
-      });
-      if (composed.isEmpty()) return null;
-      const png = composed.toPNG();
-      return png.length ? png : null;
-    } catch (error) {
-      log.warn("[ScreenshotService] stitch failed", error);
-      return null;
     }
+
+    if (!images.length) return null;
+
+    if (images.length === 1 || displays.length === 1) {
+      const size = images[0].image.getSize();
+      return {
+        buffer: images[0].image.toPNG(),
+        width: size.width,
+        height: size.height,
+      };
+    }
+
+    const remaining = [...displays];
+    const tiles: StitchTile[] = [];
+    for (const { image } of images) {
+      const { width, height } = image.getSize();
+      const matchIndex = remaining.findIndex((display) =>
+        displayMatchesPixels(display, width, height),
+      );
+      const display = matchIndex >= 0 ? remaining.splice(matchIndex, 1)[0] : remaining.shift();
+      if (!display) break;
+      tiles.push({ display, image });
+    }
+
+    if (tiles.length < 2) {
+      const size = images[0].image.getSize();
+      return {
+        buffer: images[0].image.toPNG(),
+        width: size.width,
+        height: size.height,
+      };
+    }
+
+    const stitched = stitchDisplayTiles(tiles);
+    if (!stitched) return null;
+    log.info(
+      `[ScreenshotService] stitched ${tiles.length} mac displays into ${stitched.width}x${stitched.height}`,
+    );
+    return stitched;
   }
 
   private async captureViaCli(): Promise<Omit<CapturedScreenshot, "capturedAt"> | null> {
@@ -303,13 +314,8 @@ export class ScreenshotService {
         );
       }
     } else if (process.platform === "darwin") {
-      // Silent PNG capture of the full desktop (triggers Screen Recording TCC).
       commands.push({
         bin: "/usr/sbin/screencapture",
-        args: ["-x", "-t", "png", tmpPath],
-      });
-      commands.push({
-        bin: "screencapture",
         args: ["-x", "-t", "png", tmpPath],
       });
     } else if (process.platform === "win32") {
@@ -339,18 +345,24 @@ $g.Dispose(); $bmp.Dispose()
         });
         const buffer = await fs.readFile(tmpPath);
         if (buffer.length < 100) {
-          log.warn(`[ScreenshotService] ${cmd.bin} wrote tiny file`);
+          log.warn(`[ScreenshotService] ${cmd.bin} wrote tiny file (${buffer.length} bytes)`);
           continue;
         }
         // Unlink after successful read (do not use finally — that raced the next attempt).
         void fs.unlink(tmpPath).catch(() => undefined);
+        const image = nativeImage.createFromBuffer(buffer);
+        const size = image.isEmpty() ? { width: 0, height: 0 } : image.getSize();
         return {
           buffer,
-          width: 0,
-          height: 0,
+          width: size.width,
+          height: size.height,
         };
       } catch (error) {
-        log.debug(`[ScreenshotService] ${cmd.bin} unavailable/failed`, error);
+        const err = error as { message?: string; stderr?: string | Buffer; code?: string | number };
+        log.warn(
+          `[ScreenshotService] ${cmd.bin} failed: ${err.message || error}` +
+            (err.stderr ? ` stderr=${String(err.stderr).slice(0, 300)}` : ""),
+        );
         void fs.unlink(tmpPath).catch(() => undefined);
       }
     }
@@ -360,5 +372,144 @@ $g.Dispose(); $bmp.Dispose()
 
   async list(): Promise<unknown[]> {
     return [];
+  }
+}
+
+type SourceTile = {
+  source: Electron.DesktopCapturerSource;
+  size: { width: number; height: number };
+};
+
+type StitchTile = {
+  display: Display;
+  image: Electron.NativeImage;
+};
+
+function stitchFromSources(
+  displays: Display[],
+  usable: SourceTile[],
+): Omit<CapturedScreenshot, "capturedAt"> | null {
+  const used = new Set<string>();
+  const tiles: StitchTile[] = [];
+
+  for (const display of displays) {
+    const match =
+      usable.find(
+        ({ source }) => !used.has(source.id) && source.display_id === String(display.id),
+      ) ?? usable.find(({ source }) => !used.has(source.id));
+    if (!match) continue;
+    used.add(match.source.id);
+    tiles.push({ display, image: match.source.thumbnail });
+  }
+
+  if (tiles.length < 2) return null;
+
+  const stitched = stitchDisplayTiles(tiles);
+  if (!stitched) return null;
+
+  log.info(
+    `[ScreenshotService] stitched ${tiles.length} displays into ${stitched.width}x${stitched.height}`,
+  );
+  return stitched;
+}
+
+function usableSources(sources: Electron.DesktopCapturerSource[]): SourceTile[] {
+  return sources
+    .map((source) => ({
+      source,
+      size: source.thumbnail?.getSize() ?? { width: 0, height: 0 },
+    }))
+    .filter(
+      ({ source, size }) =>
+        source.thumbnail && !source.thumbnail.isEmpty() && size.width >= 32 && size.height >= 32,
+    );
+}
+
+function displayMatchesPixels(display: Display, width: number, height: number): boolean {
+  const scale = display.scaleFactor || 1;
+  const pairs: Array<[number, number]> = [
+    [display.size.width, display.size.height],
+    [Math.round(display.size.width * scale), Math.round(display.size.height * scale)],
+    [display.bounds.width, display.bounds.height],
+    [Math.round(display.bounds.width * scale), Math.round(display.bounds.height * scale)],
+  ];
+  return pairs.some(([w, h]) => Math.abs(w - width) <= 4 && Math.abs(h - height) <= 4);
+}
+
+function stitchThumbnailSize(displays: Display[]): { width: number; height: number } {
+  let width = 1920;
+  let height = 1080;
+  for (const display of displays) {
+    const scale = Math.min(display.scaleFactor || 1, 2);
+    width = Math.max(width, Math.floor(display.size.width * scale));
+    height = Math.max(height, Math.floor(display.size.height * scale));
+  }
+  return {
+    width: Math.min(width, STITCH_MAX_EDGE),
+    height: Math.min(height, STITCH_MAX_EDGE),
+  };
+}
+
+function stitchDisplayTiles(tiles: StitchTile[]): Omit<CapturedScreenshot, "capturedAt"> | null {
+  const minX = Math.min(...tiles.map((t) => t.display.bounds.x));
+  const minY = Math.min(...tiles.map((t) => t.display.bounds.y));
+  const maxX = Math.max(...tiles.map((t) => t.display.bounds.x + t.display.bounds.width));
+  const maxY = Math.max(...tiles.map((t) => t.display.bounds.y + t.display.bounds.height));
+  const logicalW = maxX - minX;
+  const logicalH = maxY - minY;
+  if (logicalW < 32 || logicalH < 32) return null;
+
+  let scale = Math.min(2, Math.max(...tiles.map((t) => t.display.scaleFactor || 1)));
+  const longest = Math.max(logicalW, logicalH) * scale;
+  if (longest > STITCH_MAX_EDGE) {
+    scale = STITCH_MAX_EDGE / Math.max(logicalW, logicalH);
+  }
+
+  const canvasW = Math.max(1, Math.round(logicalW * scale));
+  const canvasH = Math.max(1, Math.round(logicalH * scale));
+  const dest = Buffer.alloc(canvasW * canvasH * 4, 0);
+  for (let i = 3; i < dest.length; i += 4) dest[i] = 255;
+
+  for (const tile of tiles) {
+    const destW = Math.max(1, Math.round(tile.display.bounds.width * scale));
+    const destH = Math.max(1, Math.round(tile.display.bounds.height * scale));
+    const destX = Math.round((tile.display.bounds.x - minX) * scale);
+    const destY = Math.round((tile.display.bounds.y - minY) * scale);
+    const resized = tile.image.resize({ width: destW, height: destH, quality: "best" });
+    const src = resized.toBitmap();
+    const srcSize = resized.getSize();
+    blitBGRA(dest, canvasW, canvasH, src, srcSize.width, srcSize.height, destX, destY);
+  }
+
+  const png = nativeImage.createFromBitmap(dest, { width: canvasW, height: canvasH }).toPNG();
+  if (!png.length) return null;
+  return { buffer: png, width: canvasW, height: canvasH };
+}
+
+function blitBGRA(
+  dest: Buffer,
+  destW: number,
+  destH: number,
+  src: Buffer,
+  srcW: number,
+  srcH: number,
+  dx: number,
+  dy: number,
+) {
+  for (let row = 0; row < srcH; row++) {
+    const y = dy + row;
+    if (y < 0 || y >= destH) continue;
+    let x = dx;
+    let srcX = 0;
+    let width = srcW;
+    if (x < 0) {
+      srcX = -x;
+      width += x;
+      x = 0;
+    }
+    if (x + width > destW) width = destW - x;
+    if (width <= 0) continue;
+    const srcOffset = (row * srcW + srcX) * 4;
+    dest.set(src.subarray(srcOffset, srcOffset + width * 4), (y * destW + x) * 4);
   }
 }

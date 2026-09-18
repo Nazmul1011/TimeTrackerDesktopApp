@@ -9,7 +9,9 @@ import { SCREENSHOT_CAPTURED_EVENT } from "@/hooks/useTrackingAgent";
 import { emitNotificationsChanged } from "@/hooks/useNotifications";
 import { useOrgTimezone } from "@/hooks/useOrgTimezone";
 import { screenshotApi, resolveScreenshotUrl } from "@/services/api/screenshot.api";
+import { getElectronAPI, isElectron } from "@/services/electron";
 import { useAuthStore } from "@/store/auth.store";
+import { useTimerStore } from "@/store/timer.store";
 import { ScreenshotCard, type ScreenshotItem } from "@/components/screenshots/screenshot-card";
 
 function mapApiToItem(item: {
@@ -34,11 +36,13 @@ function mapApiToItem(item: {
 
 export function ScreenshotGrid() {
   const organizationId = useAuthStore((s) => s.organizationId);
+  const timerStatus = useTimerStore((s) => s.timer.status);
   // Arrives with the org list, after the first render on a cold start.
   const orgTimezone = useOrgTimezone();
   const [items, setItems] = useState<ScreenshotItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [captureBlocked, setCaptureBlocked] = useState(false);
   const loadedOnceRef = useRef(false);
 
   const reload = useCallback(
@@ -126,6 +130,25 @@ export function ScreenshotGrid() {
     return () => window.clearInterval(id);
   }, [reload]);
 
+  useEffect(() => {
+    if (!isElectron()) return;
+    const api = getElectronAPI();
+    if (!api?.tracking?.onFailed) return;
+    const unsub = api.tracking.onFailed((payload) => {
+      const message = payload?.message || "";
+      if (/screen recording/i.test(message)) {
+        setCaptureBlocked(true);
+      }
+    });
+    const unsubUploaded = api.tracking.onUploaded(() => {
+      setCaptureBlocked(false);
+    });
+    return () => {
+      unsub();
+      unsubUploaded();
+    };
+  }, []);
+
   const handleRequestDelete = async (id: string) => {
     setItems((prev) => prev.map((s) => (s.id === id ? { ...s, deleteRequested: true } : s)));
     try {
@@ -154,6 +177,48 @@ export function ScreenshotGrid() {
   }
 
   if (!items.length) {
+    if (captureBlocked) {
+      return (
+        <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-4 text-center text-xs text-[var(--text-muted)]">
+          <p>
+            Turn on <span className="font-medium text-[var(--text-subtle)]">Gr8r Time Tracker</span>{" "}
+            in Screen Recording (both rows if you see two), then quit from the menu-bar{" "}
+            <span className="font-medium text-[var(--text-subtle)]">g</span> and open the app again.
+            The system dialog should appear only once.
+          </p>
+          {isElectron() ? (
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                className="rounded-lg bg-[var(--brand)] px-3 py-1.5 text-xs font-medium text-white"
+                onClick={() => {
+                  void getElectronAPI()?.tracking.openScreenRecording?.();
+                }}
+              >
+                Open Screen Recording settings
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--text-subtle)]"
+                onClick={() => {
+                  setCaptureBlocked(false);
+                  void getElectronAPI()?.tracking.retryScreenshots?.();
+                }}
+              >
+                Try again
+              </button>
+            </div>
+          ) : null}
+        </div>
+      );
+    }
+    if (timerStatus === "running") {
+      return (
+        <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-4 text-center text-xs text-[var(--text-muted)]">
+          Timer is running. The first screenshot should appear in a few seconds.
+        </div>
+      );
+    }
     return (
       <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-4 text-center text-xs text-[var(--text-muted)]">
         No screenshots yet. Start the timer — captures begin after a few seconds.
