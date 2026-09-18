@@ -11,6 +11,7 @@ import { formatElapsed } from "@/lib/dayjs";
 import { TIMER_STOPPED_EVENT } from "@/lib/timer-events";
 import {
   pauseTimer,
+  resetDayTimer,
   resumeTimer,
   runTimerMutation,
   selectProject,
@@ -202,10 +203,9 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
     await stopTimer();
   }, []);
 
-  // Reset / restart is disabled.
-  // const restart = useCallback(async () => {
-  //   await restartTimer();
-  // }, []);
+  const resetDay = useCallback(async () => {
+    return await resetDayTimer();
+  }, []);
 
   const displayMs = getDisplayMs();
 
@@ -223,6 +223,7 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
     stop,
     pause,
     resume,
+    resetDay,
     selectProject,
     setProject,
     setDescription,

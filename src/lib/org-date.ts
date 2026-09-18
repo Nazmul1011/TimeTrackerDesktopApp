@@ -56,11 +56,11 @@ export function todayInUserZone(): string {
 
 // Calendar arithmetic runs on a UTC-anchored date so the device offset can
 // never shift a day boundary.
-function ymdToUtc(ymd: string): Date {
+export function ymdToUtc(ymd: string): Date {
   return new Date(`${ymd}T00:00:00.000Z`);
 }
 
-function shiftDays(ymd: string, days: number): string {
+export function shiftDays(ymd: string, days: number): string {
   const date = ymdToUtc(ymd);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);

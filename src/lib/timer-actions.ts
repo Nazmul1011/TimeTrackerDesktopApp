@@ -10,6 +10,7 @@ import { getElectronAPI, isElectron } from "@/services/electron";
 import { timerApi } from "@/services/api/timer.api";
 import { timesheetApi } from "@/services/api/timesheet.api";
 import { useTimerStore } from "@/store/timer.store";
+import { getUserTimezone } from "@/lib/org-date";
 
 let busy = false;
 
@@ -128,30 +129,28 @@ export async function stopTimer(options?: {
 }
 
 /**
- * Restart / reset-day is disabled. Keep the implementation for a later restore.
- *
- * export async function restartTimer(): Promise<void> {
- *   const state = useTimerStore.getState();
- *   const projectId = state.selectedProjectId;
- *   const description = state.timer.description;
- *   await runTimerMutation(async () => {
- *     try {
- *       await timerApi.resetDay();
- *       useTimerStore.getState().beginSessionClock();
- *       dispatchTimerStopped({ totalDurationSeconds: 0, entryCount: 0 });
- *       const apiTimer = await timerApi.start({
- *         projectId: sanitizeProjectId(projectId),
- *         description: description || undefined,
- *       });
- *       useTimerStore.getState().hydrateFromApi(apiTimer);
- *       cancelWindowReveal();
- *       toast.success("Today’s timer was reset");
- *     } catch (err) {
- *       toast.error(getErrorMessage(err, "Failed to restart timer"));
- *     }
- *   });
- * }
+ * Fully reset today's tracked time to 00:00:00:
+ * Discards any active session and deletes today's timesheet + activity logs on backend & desktop.
  */
+export async function resetDayTimer(): Promise<boolean> {
+  let ok = false;
+  await runTimerMutation(async () => {
+    try {
+      await timerApi.resetDay(getUserTimezone());
+      const store = useTimerStore.getState();
+      const currentProject = store.selectedProjectId;
+      store.reset();
+      store.setProject(currentProject);
+      dispatchTimerStopped({ totalDurationSeconds: 0, entryCount: 0 });
+      cancelWindowReveal();
+      toast.success("Today’s time was reset to 00:00:00");
+      ok = true;
+    } catch (err) {
+      toast.error(getErrorMessage(err, "Failed to reset today's time"));
+    }
+  });
+  return ok;
+}
 
 /** Picker change: stop the live session so time stays on the project it was tracked for. */
 export async function selectProject(projectId: string | null): Promise<void> {
