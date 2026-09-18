@@ -82,14 +82,16 @@ export const timerApi = {
   },
 
   /** Discard the live session and delete today's timesheet + activity for this user. */
-  async resetDay() {
+  async resetDay(timezone?: string) {
     const { data } = await apiClient.post<
       ApiResponse<{
         date?: string;
         entriesDeleted?: number;
         activitiesDeleted?: number;
       }>
-    >("/timer/reset-day");
+    >("/timer/reset-day", {
+      timezone: timezone ?? getUserTimezone(),
+    });
     return data.data;
   },
 

@@ -4,9 +4,16 @@
  */
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatElapsed } from "@/lib/dayjs";
-import { monthDayLabelInZone, weekdayLabelInZone } from "@/lib/org-date";
+import {
+  monthDayLabelInZone,
+  shiftDays,
+  todayInZone,
+  weekdayLabelInZone,
+  weekEndYmd,
+  ymdToUtc,
+} from "@/lib/org-date";
 import { useOrgTimezone } from "@/hooks/useOrgTimezone";
 import {
   codeFromProjectName,
@@ -26,10 +33,18 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { FigmaGlyph } from "@/components/icons/figma-glyph";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-// import { RotateCw } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 function apiErrorMessage(err: unknown, fallback: string): string {
@@ -64,6 +79,7 @@ export function TimerCard() {
     stop,
     pause,
     resume,
+    resetDay,
     selectProject,
     setProject,
   } = useTimer();
@@ -76,6 +92,18 @@ export function TimerCard() {
   const [clientName, setClientName] = useState("");
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+
+  const handleConfirmReset = async () => {
+    setIsResetting(true);
+    try {
+      await resetDay();
+      setResetConfirmOpen(false);
+    } finally {
+      setIsResetting(false);
+    }
+  };
 
   const loadProjects = useCallback(async () => {
     if (!organizationId) return;
@@ -104,6 +132,95 @@ export function TimerCard() {
 
   const todayDate = useTimerStore((s) => s.todayDate);
 
+  const [weekDailyTotals, setWeekDailyTotals] = useState<Record<string, number>>({});
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  const todayCardRef = useRef<HTMLDivElement | null>(null);
+  const isDraggingRef = useRef(false);
+  const startXRef = useRef(0);
+  const scrollLeftRef = useRef(0);
+
+  // Past 21 days (3 weeks) through the end of the current week (Sunday)
+  const dateRange = useMemo(() => {
+    const currentTodayYmd = todayDate || todayInZone(orgTimezone);
+    const start = shiftDays(currentTodayYmd, -21);
+    const end = weekEndYmd(orgTimezone);
+    return { start, end };
+  }, [orgTimezone, todayDate]);
+
+  const weekDays = useMemo(() => {
+    const days: Array<{
+      ymd: string;
+      weekday: string;
+      monthDay: string;
+      isToday: boolean;
+    }> = [];
+    const currentTodayYmd = todayDate || todayInZone(orgTimezone);
+    const startMs = ymdToUtc(dateRange.start).getTime();
+    const endMs = ymdToUtc(dateRange.end).getTime();
+    const totalDays = Math.max(1, Math.round((endMs - startMs) / (24 * 60 * 60 * 1000)) + 1);
+
+    for (let i = 0; i < totalDays; i++) {
+      const ymd = shiftDays(dateRange.start, i);
+      const date = ymdToUtc(ymd);
+      const weekday = new Intl.DateTimeFormat("en-US", {
+        timeZone: "UTC",
+        weekday: "short",
+      }).format(date);
+      const monthDay = new Intl.DateTimeFormat("en-US", {
+        timeZone: "UTC",
+        month: "short",
+        day: "numeric",
+      }).format(date);
+      days.push({
+        ymd,
+        weekday,
+        monthDay,
+        isToday: ymd === currentTodayYmd,
+      });
+    }
+    return days;
+  }, [dateRange, orgTimezone, todayDate]);
+
+  const loadWeekTotals = useCallback(async () => {
+    if (!organizationId) return;
+    try {
+      const { start, end } = dateRange;
+      const entries = await timesheetApi.listRange(start, end);
+      const totals: Record<string, number> = {};
+      for (const entry of entries) {
+        const entryYmd = entry.date
+          ? entry.date.slice(0, 10)
+          : entry.startTime
+            ? entry.startTime.slice(0, 10)
+            : "";
+        if (entryYmd) {
+          totals[entryYmd] = (totals[entryYmd] ?? 0) + (entry.duration ?? 0);
+        }
+      }
+      setWeekDailyTotals(totals);
+    } catch {
+      setWeekDailyTotals({});
+    }
+  }, [organizationId, dateRange]);
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    isDraggingRef.current = true;
+    startXRef.current = e.pageX - (stripRef.current?.offsetLeft ?? 0);
+    scrollLeftRef.current = stripRef.current?.scrollLeft ?? 0;
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isDraggingRef.current || !stripRef.current) return;
+    e.preventDefault();
+    const x = e.pageX - stripRef.current.offsetLeft;
+    const walk = (x - startXRef.current) * 1.2;
+    stripRef.current.scrollLeft = scrollLeftRef.current - walk;
+  };
+
+  const handleMouseUpOrLeave = () => {
+    isDraggingRef.current = false;
+  };
+
   useEffect(() => {
     void loadProjects();
   }, [loadProjects]);
@@ -111,7 +228,12 @@ export function TimerCard() {
   useEffect(() => {
     setSecondsByProject({});
     void loadTodayByProject();
-  }, [todayDate, loadTodayByProject]);
+    void loadWeekTotals();
+  }, [todayDate, loadTodayByProject, loadWeekTotals]);
+
+  useEffect(() => {
+    void loadWeekTotals();
+  }, [loadWeekTotals]);
 
   useEffect(() => {
     if (!selectedProjectId) return;
@@ -127,10 +249,20 @@ export function TimerCard() {
   useEffect(() => {
     const handler = () => {
       void loadTodayByProject();
+      void loadWeekTotals();
     };
     window.addEventListener(TIMER_STOPPED_EVENT, handler);
     return () => window.removeEventListener(TIMER_STOPPED_EVENT, handler);
-  }, [loadTodayByProject]);
+  }, [loadTodayByProject, loadWeekTotals]);
+
+  useEffect(() => {
+    if (todayCardRef.current && stripRef.current) {
+      const container = stripRef.current;
+      const card = todayCardRef.current;
+      const scrollTarget = card.offsetLeft - container.offsetWidth / 2 + card.offsetWidth / 2;
+      container.scrollTo({ left: Math.max(0, scrollTarget), behavior: "smooth" });
+    }
+  }, [dateRange, todayDate]);
 
   const clientOptions = useMemo(() => {
     const names = new Set<string>();
@@ -482,24 +614,22 @@ export function TimerCard() {
       </div>
 
       <div className="mt-8 flex flex-col items-center gap-4 pb-2">
-        <div className="flex items-center gap-2">
-          <p className="text-[32px] font-medium tabular-nums leading-[34px] tracking-wide text-black">
-            {display}
-          </p>
-          {/* Reset / restart is disabled.
-          {(isRunning || isPaused) && (
+        <div className="relative flex items-center justify-center">
+          {(displayMs > 0 || isRunning || isPaused) && (
             <button
               type="button"
-              aria-label="Restart timer"
-              title="Restart timer"
-              disabled={isSyncing}
-              className="flex size-8 shrink-0 items-center justify-center rounded-full text-[#6a7282] outline-none transition-colors hover:bg-[#f5f5f5] hover:text-[#1e2939] focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35 disabled:opacity-50"
-              onClick={() => void restart()}
+              aria-label="Reset today's time"
+              title="Reset today's time to 00:00:00"
+              disabled={isSyncing || isResetting}
+              className="absolute -right-12 flex size-7 shrink-0 items-center justify-center rounded-full text-[#18181b] outline-none transition-colors hover:bg-[#f5f5f5] hover:text-black focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35 disabled:opacity-40 dark:text-white dark:hover:bg-[#334155]"
+              onClick={() => setResetConfirmOpen(true)}
             >
-              <RotateCw className="size-4" strokeWidth={2} />
+              <RotateCcw className="size-4" strokeWidth={2} />
             </button>
           )}
-          */}
+          <p className="text-[32px] font-medium tabular-nums leading-[34px] tracking-wide text-black dark:text-white">
+            {display}
+          </p>
         </div>
         {isIdle && displayMs > 0 && <p className="text-[11px] text-[#99a1af]">Today</p>}
 
@@ -525,10 +655,18 @@ export function TimerCard() {
               Pause
             </Button>
             <Button
-              className="h-9 gap-1 rounded-lg bg-[#f4323c] px-5 text-sm font-medium text-white hover:bg-[#e12d36]"
+              className="h-9 gap-1.5 rounded-lg bg-[#f4323c] px-5 text-sm font-medium text-white hover:bg-[#e12d36]"
               disabled={isSyncing}
               onClick={() => void stop()}
             >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/figma/icon-play.svg"
+                alt=""
+                className="size-3.5 brightness-0 invert"
+                width={14}
+                height={14}
+              />
               Stop
             </Button>
           </div>
@@ -552,15 +690,103 @@ export function TimerCard() {
               Resume
             </Button>
             <Button
-              className="h-9 rounded-lg bg-[#f4323c] px-5 text-sm font-medium text-white hover:bg-[#e12d36]"
+              className="h-9 gap-1.5 rounded-lg bg-[#f4323c] px-5 text-sm font-medium text-white hover:bg-[#e12d36]"
               disabled={isSyncing}
               onClick={() => void stop()}
             >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/figma/icon-play.svg"
+                alt=""
+                className="size-3.5 brightness-0 invert"
+                width={14}
+                height={14}
+              />
               Stop
             </Button>
           </div>
         )}
       </div>
+
+      {/* Week days strip */}
+      <div
+        ref={stripRef}
+        onWheel={(e) => {
+          if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+            e.currentTarget.scrollLeft += e.deltaY;
+          }
+        }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUpOrLeave}
+        onMouseLeave={handleMouseUpOrLeave}
+        className="scrollbar-hide -mx-1 mt-3 flex cursor-grab select-none items-center gap-2 overflow-x-auto px-1 pb-1 pt-0.5 active:cursor-grabbing"
+      >
+        {weekDays.map((day) => {
+          const live =
+            day.isToday && (isRunning || isPaused) ? Math.floor(timer.elapsedMs / 1000) : 0;
+          const daySeconds = (weekDailyTotals[day.ymd] ?? 0) + live;
+          return (
+            <div
+              key={day.ymd}
+              ref={day.isToday ? todayCardRef : undefined}
+              className={cn(
+                "flex min-w-[102px] shrink-0 flex-col items-start gap-1.5 rounded-2xl border bg-white px-3 py-2 transition-colors dark:bg-[#1e293b]",
+                day.isToday
+                  ? "border-[#ededed] shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:border-[#334155]"
+                  : "border-[#ededed] dark:border-[#334155]",
+              )}
+            >
+              <div className="flex items-center gap-1.5 text-xs leading-4">
+                <span className="font-semibold text-[#1e2939] dark:text-[#f1f5f9]">
+                  {day.weekday}
+                </span>
+                <span className="font-normal text-[#6a7282] dark:text-[#94a3b8]">
+                  {day.monthDay}
+                </span>
+              </div>
+              <div className="rounded-md bg-[#f5f5f5] px-2 py-0.5 text-xs font-medium tabular-nums text-[#1e2939] dark:bg-[#334155] dark:text-[#f1f5f9]">
+                {formatElapsed(daySeconds * 1000)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <Dialog open={resetConfirmOpen} onOpenChange={setResetConfirmOpen}>
+        <DialogContent className="max-w-[340px] rounded-2xl p-5">
+          <DialogHeader className="gap-1.5 text-left">
+            <DialogTitle className="text-base font-semibold text-[#1e2939] dark:text-[#f1f5f9]">
+              Reset today&apos;s time?
+            </DialogTitle>
+            <DialogDescription className="text-xs leading-relaxed text-[#6a7282] dark:text-[#94a3b8]">
+              This will discard any active timer and reset all tracked time for today to 00:00:00.
+              This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-3 flex flex-row justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg px-3 text-xs"
+              disabled={isResetting}
+              onClick={() => setResetConfirmOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 rounded-lg bg-[#f4323c] px-3 text-xs font-medium text-white hover:bg-[#e12d36]"
+              disabled={isResetting}
+              onClick={() => void handleConfirmReset()}
+            >
+              {isResetting ? "Resetting…" : "Reset Day"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

@@ -33,6 +33,27 @@ export const timesheetApi = {
     return data.data?.entries ?? [];
   },
 
+  /** List entries within a date range (inclusive). */
+  async listRange(startDate: string, endDate: string) {
+    let page = 1;
+    const allEntries: ApiTimeEntry[] = [];
+    while (page <= 5) {
+      const { data } = await apiClient.get<
+        ApiResponse<{
+          entries: ApiTimeEntry[];
+          pagination?: { hasNext?: boolean };
+        }>
+      >("/time-entries", {
+        params: { startDate, endDate, limit: 200, page },
+      });
+      const list = data.data?.entries ?? [];
+      allEntries.push(...list);
+      if (!data.data?.pagination?.hasNext || list.length === 0) break;
+      page++;
+    }
+    return allEntries;
+  },
+
   /** Total saved seconds for today (completed time entries only). */
   async getTodayLoggedSeconds(timeZone?: string | null) {
     const entries = await this.listToday(timeZone);
