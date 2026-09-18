@@ -19,6 +19,7 @@ import { useTimer } from "@/hooks/useTimer";
 import { projectsApi, type ApiProject } from "@/services/api/projects.api";
 import { timesheetApi } from "@/services/api/timesheet.api";
 import { useAuthStore } from "@/store/auth.store";
+import { useTimerStore } from "@/store/timer.store";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -101,10 +102,16 @@ export function TimerCard() {
     }
   }, [organizationId, orgTimezone]);
 
+  const todayDate = useTimerStore((s) => s.todayDate);
+
   useEffect(() => {
     void loadProjects();
+  }, [loadProjects]);
+
+  useEffect(() => {
+    setSecondsByProject({});
     void loadTodayByProject();
-  }, [loadProjects, loadTodayByProject]);
+  }, [todayDate, loadTodayByProject]);
 
   useEffect(() => {
     if (!selectedProjectId) return;

@@ -4,6 +4,7 @@
 import { apiClient, ensureDeviceId } from "./client";
 import type { ApiResponse, ApiTimer } from "./types";
 import { isValidProjectId } from "@/lib/project";
+import { getUserTimezone } from "@/lib/org-date";
 
 export type StartTimerPayload = {
   projectId?: string;
@@ -93,14 +94,17 @@ export const timerApi = {
   },
 
   /** Split the live session at midnight, saving yesterday and advancing start time to 00:00:00. */
-  async midnightSplit(occurredAt?: string) {
+  async midnightSplit(occurredAt?: string, timezone?: string) {
     const { data } = await apiClient.post<
       ApiResponse<{
         split: boolean;
         yesterdayEntry?: unknown;
         runningTimer?: ApiTimer;
       }>
-    >("/timer/midnight-split", occurredAt ? { occurredAt } : {});
+    >("/timer/midnight-split", {
+      occurredAt,
+      timezone: timezone ?? getUserTimezone(),
+    });
     return data.data;
   },
 };

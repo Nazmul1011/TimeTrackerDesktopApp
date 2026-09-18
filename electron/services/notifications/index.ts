@@ -72,10 +72,8 @@ export class NotificationService {
     this.showOverlayBanner(safeTitle, safeBody);
     this.playAlertSound();
 
-    // Unsigned/ad-hoc Electron on macOS often reports Notification.isSupported()
-    // then silently drops the banner. AppleScript still reaches Notification Center.
+    // On macOS, display our custom branded overlay banner only (prevents duplicate system banner).
     if (process.platform === "darwin") {
-      void this.showMacOsascriptFallback(safeTitle, safeBody);
       return { ok: true };
     }
 
@@ -254,8 +252,8 @@ $notifier.Show($toast)
         .replace(/"/g, "&quot;");
 
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-    const width = 380;
-    const height = 104;
+    const width = 370;
+    const height = 82;
     const gap = 16;
     const x = Math.round(display.workArea.x + display.workArea.width - width - gap);
     const y = Math.round(display.workArea.y + gap);
@@ -266,8 +264,8 @@ $notifier.Show($toast)
       x,
       y,
       frame: false,
-      transparent: false,
-      backgroundColor: "#111827",
+      transparent: true,
+      backgroundColor: "#00000000",
       resizable: false,
       movable: true,
       minimizable: false,
@@ -277,7 +275,7 @@ $notifier.Show($toast)
       focusable: false,
       alwaysOnTop: true,
       show: false,
-      hasShadow: true,
+      hasShadow: false,
       roundedCorners: true,
       ...(process.platform === "darwin" ? { type: "panel" as const } : {}),
       title: "gr8r-idle-toast",
@@ -291,46 +289,225 @@ $notifier.Show($toast)
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     win.setAlwaysOnTop(true, "screen-saver");
 
-    const iconUrl = this.brandIconDataUrl();
-    const iconHtml = iconUrl
-      ? `<img class="brand" src="${iconUrl}" alt="" />`
-      : `<div class="dot">g</div>`;
+    const titleLower = (title || "").toLowerCase();
+    const bodyLower = (body || "").toLowerCase();
+    const isPaused = titleLower.includes("pause") || bodyLower.includes("pause");
+    const isResumed =
+      titleLower.includes("start") ||
+      titleLower.includes("resume") ||
+      bodyLower.includes("resume") ||
+      bodyLower.includes("running");
+    const isStopped = titleLower.includes("stop") || bodyLower.includes("stop");
+
+    let statusClass = "info";
+    let statusIconSvg = `
+      <div class="inner-circle">
+        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <circle cx="6" cy="6" r="4.5"/>
+          <path d="M6 5.5v3M6 3.5h.01"/>
+        </svg>
+      </div>`;
+
+    if (isPaused) {
+      statusClass = "paused";
+      statusIconSvg = `
+        <div class="inner-circle">
+          <svg viewBox="0 0 12 12" fill="currentColor">
+            <rect x="3.2" y="2.8" width="1.8" height="6.4" rx="0.9"/>
+            <rect x="7" y="2.8" width="1.8" height="6.4" rx="0.9"/>
+          </svg>
+        </div>`;
+    } else if (isResumed) {
+      statusClass = "active";
+      statusIconSvg = `
+        <div class="inner-circle">
+          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2.5 6.5l2.5 2.5 4.5-5"/>
+          </svg>
+        </div>`;
+    } else if (isStopped) {
+      statusClass = "stopped";
+      statusIconSvg = `
+        <div class="inner-circle">
+          <svg viewBox="0 0 12 12" fill="currentColor">
+            <rect x="3" y="3" width="6" height="6" rx="1.2"/>
+          </svg>
+        </div>`;
+    }
 
     const html = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8" />
 <style>
-  html, body { margin: 0; background: #111827; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  }
+  .wrapper {
+    width: 100%;
+    height: 100%;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
   .card {
-    padding: 14px 16px;
+    width: 100%;
+    height: 100%;
+    background: #0c111d;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 14px 30px -4px rgba(0, 0, 0, 0.65), 0 4px 12px rgba(0, 0, 0, 0.4);
+    border-radius: 12px;
+    padding: 10px 12px;
     color: #fff;
     display: flex;
     gap: 10px;
-    align-items: flex-start;
+    align-items: center;
     cursor: pointer;
-    height: 100vh;
-    box-sizing: border-box;
+    transition: border-color 0.2s ease;
   }
-  .brand {
-    width: 28px; height: 28px; border-radius: 8px; flex: none;
-    object-fit: cover; background: #2B7FFF;
+  .card:hover {
+    border-color: rgba(255, 255, 255, 0.16);
   }
-  .dot {
-    width: 28px; height: 28px; border-radius: 8px; flex: none;
-    background: #2B7FFF; color: #fff; font-weight: 700;
-    display: flex; align-items: center; justify-content: center; font-size: 15px;
+  /* Concentric circle status icon */
+  .status-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
   }
-  .title { font-size: 13px; font-weight: 600; line-height: 1.2; }
-  .body { margin-top: 4px; font-size: 11px; line-height: 1.35; color: #e5e7eb; }
+  .status-icon.active {
+    background: rgba(16, 185, 129, 0.12);
+    border: 2px solid rgba(16, 185, 129, 0.22);
+    color: #10b981;
+  }
+  .status-icon.active .inner-circle {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1.5px solid #10b981;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .status-icon.paused {
+    background: rgba(245, 158, 11, 0.12);
+    border: 2px solid rgba(245, 158, 11, 0.22);
+    color: #f59e0b;
+  }
+  .status-icon.paused .inner-circle {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1.5px solid #f59e0b;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .status-icon.stopped {
+    background: rgba(239, 68, 68, 0.12);
+    border: 2px solid rgba(239, 68, 68, 0.22);
+    color: #ef4444;
+  }
+  .status-icon.stopped .inner-circle {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1.5px solid #ef4444;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .status-icon.info {
+    background: rgba(43, 127, 255, 0.12);
+    border: 2px solid rgba(43, 127, 255, 0.22);
+    color: #2b7fff;
+  }
+  .status-icon.info .inner-circle {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1.5px solid #2b7fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .status-icon svg {
+    width: 10px;
+    height: 10px;
+  }
+  .content {
+    flex: 1;
+    min-width: 0;
+  }
+  .title {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #ffffff;
+    letter-spacing: -0.01em;
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .body {
+    margin-top: 3px;
+    font-size: 11.5px;
+    line-height: 1.35;
+    color: #94a3b8;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .close-btn {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    background: transparent;
+    border: none;
+    color: #64748b;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s ease, background 0.15s ease;
+    margin-right: -2px;
+  }
+  .close-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #f1f5f9;
+  }
+  .close-btn svg {
+    width: 12px;
+    height: 12px;
+  }
 </style>
 </head>
 <body>
-  <div class="card" onclick="window.close()">
-    ${iconHtml}
-    <div>
-      <div class="title">${escapeHtml(title)}</div>
-      <div class="body">${escapeHtml(body)}</div>
+  <div class="wrapper">
+    <div class="card" onclick="window.close()">
+      <div class="status-icon ${statusClass}">
+        ${statusIconSvg}
+      </div>
+      <div class="content">
+        <div class="title">${escapeHtml(title)}</div>
+        <div class="body">${escapeHtml(body)}</div>
+      </div>
+      <button class="close-btn" onclick="event.stopPropagation(); window.close();" aria-label="Close">
+        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <path d="M2 2l8 8M10 2l-8 8"/>
+        </svg>
+      </button>
     </div>
   </div>
 </body>

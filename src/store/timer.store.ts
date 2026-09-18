@@ -5,9 +5,10 @@
  */
 import { create } from "zustand";
 import type { ApiTimer } from "@/services/api/types";
-import { getOrgTimezone, todayInUserZone, todayInZone } from "@/lib/org-date";
+import { getOrgTimezone, getUserTimezone, todayInUserZone, todayInZone } from "@/lib/org-date";
 import { timerApi } from "@/services/api/timer.api";
 import { sanitizeProjectId } from "@/lib/project";
+import { dispatchTimerStopped } from "@/lib/timer-events";
 import type { Timer, TimerStatus } from "@/types";
 
 interface TimerState {
@@ -190,7 +191,15 @@ export const useTimerStore = create<TimerState>((set, get) => ({
           elapsedMs: 0,
         },
       });
-      void timerApi.midnightSplit().catch(() => {});
+      void timerApi
+        .midnightSplit(undefined, getUserTimezone())
+        .then((res) => {
+          if (res?.runningTimer) {
+            get().hydrateFromApi(res.runningTimer);
+          }
+        })
+        .catch(() => {});
+      dispatchTimerStopped();
     } else if (timer.status === "paused") {
       set({
         todayDate: today,
@@ -203,18 +212,27 @@ export const useTimerStore = create<TimerState>((set, get) => ({
           elapsedMs: 0,
         },
       });
-      void timerApi.midnightSplit().catch(() => {});
+      void timerApi
+        .midnightSplit(undefined, getUserTimezone())
+        .then((res) => {
+          if (res?.runningTimer) {
+            get().hydrateFromApi(res.runningTimer);
+          }
+        })
+        .catch(() => {});
+      dispatchTimerStopped();
     } else {
       set({ todayDate: today, todayLoggedMs: 0, sessionClockOnly: false });
+      dispatchTimerStopped();
     }
   },
 
   setSyncing: (isSyncing) => set({ isSyncing }),
 
   tick: () => {
+    get().ensureToday();
     const { timer, segmentStartedAt, baseElapsedMs } = get();
     if (timer.status !== "running" || !segmentStartedAt) return;
-    get().ensureToday();
     set({
       timer: {
         ...timer,

@@ -12,6 +12,7 @@ import { formatTimesheetDuration } from "@/lib/project-icons";
 import { TIMER_STOPPED_EVENT } from "@/lib/timer-events";
 import { timesheetApi, type ApiTimeEntry } from "@/services/api/timesheet.api";
 import { useAuthStore } from "@/store/auth.store";
+import { useTimerStore } from "@/store/timer.store";
 
 function entryTitle(entry: ApiTimeEntry): string {
   return entry.description?.trim() || entry.project?.name || "General";
@@ -50,6 +51,8 @@ export function TimesheetTab() {
     }
   }, [organizationId, orgTimezone]);
 
+  const todayDate = useTimerStore((s) => s.todayDate);
+
   // Drop the previous org's entries immediately rather than showing them
   // until the new org's request lands.
   useEffect(() => {
@@ -58,7 +61,7 @@ export function TimesheetTab() {
 
   useEffect(() => {
     void reload();
-  }, [reload]);
+  }, [todayDate, reload]);
 
   useEffect(() => {
     const handler = () => {
@@ -152,7 +155,9 @@ export function TimesheetTab() {
   if (!rows.length) {
     return (
       <div className="overflow-hidden rounded-xl border border-[#ededed] bg-white p-4 text-center text-xs text-[#99a1af]">
-        No time logged today. Start the timer to track time.
+        {isRunning || isPaused
+          ? "Timer is currently active. Completed time will appear here when paused or stopped."
+          : "No time logged today. Start the timer to track time."}
       </div>
     );
   }
