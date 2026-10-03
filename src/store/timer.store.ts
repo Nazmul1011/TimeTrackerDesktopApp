@@ -67,12 +67,29 @@ function liveElapsed(base: number, segmentStartedAt: number | null): number {
   return base + (Date.now() - segmentStartedAt);
 }
 
+/**
+ * Elapsed ms at the moment the server built the snapshot, from its own
+ * timestamps (same formula as the backend) so repeated hydrations don't each
+ * lose up to a second to flooring. Falls back to whole seconds for an older
+ * backend that doesn't send `serverTime`.
+ */
+function serverElapsedMs(apiTimer: ApiTimer): number {
+  const start = Date.parse(apiTimer.startTime);
+  const serverNow = apiTimer.serverTime ? Date.parse(apiTimer.serverTime) : NaN;
+  if (Number.isFinite(start) && Number.isFinite(serverNow)) {
+    const pausedAt = apiTimer.pausedAt ? Date.parse(apiTimer.pausedAt) : NaN;
+    const end = Number.isFinite(pausedAt) ? pausedAt : serverNow;
+    return Math.max(0, end - start - (apiTimer.totalPausedMs ?? 0));
+  }
+  return Math.max(0, (apiTimer.elapsedSeconds ?? 0) * 1000);
+}
+
 function mapApiTimer(apiTimer: ApiTimer): {
   timer: Timer;
   baseElapsedMs: number;
   segmentStartedAt: number | null;
 } {
-  const elapsedMs = Math.max(0, (apiTimer.elapsedSeconds ?? 0) * 1000);
+  const elapsedMs = serverElapsedMs(apiTimer);
   const status: TimerStatus = apiTimer.status === "paused" ? "paused" : "running";
   return {
     timer: {
