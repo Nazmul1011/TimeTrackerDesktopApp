@@ -6,6 +6,7 @@ import { app, BrowserWindow, nativeImage, shell } from "electron";
 import path from "path";
 import log from "electron-log/main";
 import { findExistingPath, resolveAppIconPaths } from "../utils";
+import { WindowRevealService } from "../services/window-reveal";
 import { startRendererServer } from "./renderer-server";
 
 async function waitForRenderer(url: string, attempts = 40): Promise<void> {
@@ -62,6 +63,10 @@ export function createMainWindow(): BrowserWindow {
 
   // Safety net — never leave a hidden window if ready-to-show never fires
   setTimeout(reveal, 4000);
+
+  win.on("minimize", () => {
+    WindowRevealService.getInstance().cancel();
+  });
 
   // Open external links in the system browser
   win.webContents.setWindowOpenHandler(({ url }) => {

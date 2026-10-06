@@ -8,12 +8,11 @@ import { useEffect, useRef } from "react";
 import { activityApi } from "@/services/api/activity.api";
 import { authApi } from "@/services/api/auth.api";
 import { monitoringApi, type MonitoringConfig } from "@/services/api/monitoring.api";
-import { timerApi } from "@/services/api/timer.api";
 import { ensureDeviceId, getApiBaseUrl } from "@/services/api/client";
 import { STORAGE_KEYS } from "@/constants/storage";
 import { normalizeAppName } from "@/lib/app-name";
 import { notifyToast } from "@/lib/notify";
-import { cancelWindowReveal, scheduleWindowRevealAfterResume } from "@/lib/window-reveal";
+import { handleIdlePause, handleIdleResume } from "@/lib/idle-timer-sync";
 import { getElectronAPI, isElectron } from "@/services/electron";
 import { useAuthStore } from "@/store/auth.store";
 import { useSettingsStore } from "@/store/settings.store";
@@ -29,7 +28,6 @@ type Sample = {
 };
 
 const ACTIVITY_SAMPLE_MS = 10_000;
-const HEARTBEAT_MS = 60_000;
 const FLUSH_MS = 30_000;
 const FIRST_SCREENSHOT_MS = 3_000;
 const TOKEN_REFRESH_MS = 8 * 60_000;
@@ -117,34 +115,12 @@ export function useTrackingAgent() {
     const api = getElectronAPI();
     if (!api?.tracking) return;
 
-    const unsubIdle = api.tracking.onIdleTimeout?.(() => {
-      if (useTimerStore.getState().timer.status !== "running") return;
-      void (async () => {
-        try {
-          const apiTimer = await timerApi.pause();
-          useTimerStore.getState().hydrateFromApi(apiTimer);
-          cancelWindowReveal();
-          notifyToast(
-            "warning",
-            "Timer paused — you were idle. It will resume when you move the mouse or press a key.",
-          );
-        } catch (err) {
-          console.warn("[tracking] idle auto-pause failed", err);
-        }
-      })();
+    const unsubIdle = api.tracking.onIdleTimeout?.((payload) => {
+      handleIdlePause(payload?.idleSince);
     });
 
-    const unsubResume = api.tracking.onIdleResume(() => {
-      if (useTimerStore.getState().timer.status !== "paused") return;
-      void (async () => {
-        try {
-          const apiTimer = await timerApi.resume();
-          useTimerStore.getState().hydrateFromApi(apiTimer);
-          notifyToast("success", "Timer started — idle pause removed. Tracking is running again.");
-        } catch (err) {
-          console.warn("[tracking] idle auto-resume failed", err);
-        }
-      })();
+    const unsubResume = api.tracking.onIdleResume((payload) => {
+      handleIdleResume(payload?.resumedAt);
     });
 
     return () => {
@@ -243,44 +219,6 @@ export function useTrackingAgent() {
       window.clearInterval(refreshId);
     };
   }, []);
-
-  // Idle auto-pause / auto-resume — must stay subscribed while the timer is paused.
-  useEffect(() => {
-    if (!isAuthenticated || !isElectron()) return;
-    const api = getElectronAPI();
-    if (!api?.tracking) return;
-
-    const unsubIdle = api.tracking.onIdleTimeout?.(() => {
-      if (useTimerStore.getState().timer.status !== "running") return;
-      void (async () => {
-        try {
-          const apiTimer = await timerApi.pause();
-          useTimerStore.getState().hydrateFromApi(apiTimer);
-          cancelWindowReveal();
-        } catch (err) {
-          console.warn("[tracking] idle auto-pause failed", err);
-        }
-      })();
-    });
-
-    const unsubResume = api.tracking.onIdleResume?.(() => {
-      if (useTimerStore.getState().timer.status !== "paused") return;
-      void (async () => {
-        try {
-          const apiTimer = await timerApi.resume();
-          useTimerStore.getState().hydrateFromApi(apiTimer);
-          scheduleWindowRevealAfterResume();
-        } catch (err) {
-          console.warn("[tracking] idle auto-resume failed", err);
-        }
-      })();
-    });
-
-    return () => {
-      unsubIdle?.();
-      unsubResume?.();
-    };
-  }, [isAuthenticated]);
 
   // Main-process screenshot agent while timer is running
   useEffect(() => {
@@ -474,16 +412,9 @@ export function useTrackingAgent() {
       }
     };
 
-    const heartbeat = async () => {
-      try {
-        await activityApi.heartbeat();
-      } catch {
-        // ignore
-      }
-    };
-
+    // The "still here" heartbeat lives in the Electron main process
+    // (TrackingService) so a hidden, throttled window can't silence it.
     void sample();
-    void heartbeat();
 
     const sampleId = window.setInterval(() => {
       void sample();
@@ -491,15 +422,11 @@ export function useTrackingAgent() {
     const flushId = window.setInterval(() => {
       void flush();
     }, FLUSH_MS);
-    const heartbeatId = window.setInterval(() => {
-      void heartbeat();
-    }, HEARTBEAT_MS);
 
     return () => {
       cancelled = true;
       window.clearInterval(sampleId);
       window.clearInterval(flushId);
-      window.clearInterval(heartbeatId);
       void flush();
       void api.activity.stop();
       lastSampleRef.current = null;

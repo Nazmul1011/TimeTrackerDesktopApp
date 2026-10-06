@@ -18,6 +18,12 @@ export type StopTimerPayload = {
 
 export type DeviceTimerPayload = {
   deviceId?: string;
+  /**
+   * When the pause/resume really happened (ISO-8601). The server uses it
+   * instead of its own arrival time, so a delayed or replayed request still
+   * lands at the right moment.
+   */
+  occurredAt?: string;
 };
 
 export type StopTimerResult = {

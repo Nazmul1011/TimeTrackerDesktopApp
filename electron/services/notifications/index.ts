@@ -38,26 +38,22 @@ export class NotificationService {
         : `${Math.max(1, Math.round(seconds / 60))} ${
             Math.round(seconds / 60) === 1 ? "minute" : "minutes"
           }`;
-    return this.show(
-      "Timer paused",
-      `No mouse or keyboard activity for ${duration}. Timer paused — it will resume when you move the mouse or press a key.`,
-      { urgency: "critical" },
-    );
+    return this.show("Timer paused", `Idle for ${duration}. Move mouse or press a key to resume.`, {
+      urgency: "critical",
+    });
   }
 
   /** Desktop alert when idle auto-pause ends and tracking starts again. */
   showTimerIdleResumed(): { ok: boolean; message?: string } {
-    return this.show(
-      "Timer started",
-      "Activity detected — idle pause removed. The timer is running again.",
-      { urgency: "normal" },
-    );
+    return this.show("Timer resumed", "Idle pause removed. Tracking is running.", {
+      urgency: "normal",
+    });
   }
 
   show(
     title: string,
     body: string,
-    options?: { urgency?: "normal" | "critical" | "low" },
+    _options?: { urgency?: "normal" | "critical" | "low" },
   ): { ok: boolean; message?: string } {
     if (!SettingsService.getInstance().notificationsEnabled()) {
       log.info("[NotificationService] skipped — notifications disabled in settings");
@@ -67,36 +63,11 @@ export class NotificationService {
     const safeTitle = title || "Gr8r Time Tracker";
     const safeBody = body || "";
 
-    // Always draw our own on-screen banner & play sound
+    // Compact on-screen banner only — native Windows toasts are large and
+    // duplicated this banner. macOS already skips Notification Center.
     this.showOverlayBanner(safeTitle, safeBody);
     this.playAlertSound();
-
-    // On macOS, display our custom branded overlay banner only (prevents duplicate system banner).
-    if (process.platform === "darwin") {
-      return { ok: true };
-    }
-
-    if (Notification.isSupported()) {
-      const electronResult = this.showElectron(safeTitle, safeBody, options);
-      if (electronResult.ok) return electronResult;
-      log.warn(
-        "[NotificationService] Electron notification failed, trying fallback",
-        electronResult.message,
-      );
-    }
-
-    if (process.platform === "linux") {
-      void this.showLinuxNotifySend(safeTitle, safeBody, options?.urgency);
-      return { ok: true };
-    }
-
-    if (process.platform === "win32") {
-      void this.showWindowsToastFallback(safeTitle, safeBody);
-      return { ok: true };
-    }
-
-    log.warn("[NotificationService] not supported on this platform");
-    return { ok: false, message: "Notifications not supported" };
+    return { ok: true };
   }
 
   private showElectron(
@@ -258,9 +229,9 @@ $notifier.Show($toast)
       targetDisplay = screen.getDisplayMatching(mainWin.getBounds());
     }
 
-    const width = 370;
-    const height = 82;
-    const gap = 16;
+    const width = 260;
+    const height = 52;
+    const gap = 12;
     const x = Math.round(targetDisplay.workArea.x + targetDisplay.workArea.width - width - gap);
     const y = Math.round(targetDisplay.workArea.y + gap);
 
@@ -356,7 +327,7 @@ $notifier.Show($toast)
   .wrapper {
     width: 100%;
     height: 100%;
-    padding: 4px;
+    padding: 2px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -366,12 +337,12 @@ $notifier.Show($toast)
     height: 100%;
     background: #0c111d;
     border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: 0 14px 30px -4px rgba(0, 0, 0, 0.65), 0 4px 12px rgba(0, 0, 0, 0.4);
-    border-radius: 12px;
-    padding: 10px 12px;
+    box-shadow: 0 8px 18px -4px rgba(0, 0, 0, 0.55);
+    border-radius: 10px;
+    padding: 6px 8px;
     color: #fff;
     display: flex;
-    gap: 10px;
+    gap: 8px;
     align-items: center;
     cursor: pointer;
     transition: border-color 0.2s ease;
@@ -381,8 +352,8 @@ $notifier.Show($toast)
   }
   /* Concentric circle status icon */
   .status-icon {
-    width: 28px;
-    height: 28px;
+    width: 22px;
+    height: 22px;
     border-radius: 50%;
     display: flex;
     align-items: center;
@@ -391,93 +362,92 @@ $notifier.Show($toast)
   }
   .status-icon.active {
     background: rgba(16, 185, 129, 0.12);
-    border: 2px solid rgba(16, 185, 129, 0.22);
+    border: 1.5px solid rgba(16, 185, 129, 0.22);
     color: #10b981;
   }
   .status-icon.active .inner-circle {
-    width: 18px;
-    height: 18px;
+    width: 14px;
+    height: 14px;
     border-radius: 50%;
-    border: 1.5px solid #10b981;
+    border: 1.2px solid #10b981;
     display: flex;
     align-items: center;
     justify-content: center;
   }
   .status-icon.paused {
     background: rgba(245, 158, 11, 0.12);
-    border: 2px solid rgba(245, 158, 11, 0.22);
+    border: 1.5px solid rgba(245, 158, 11, 0.22);
     color: #f59e0b;
   }
   .status-icon.paused .inner-circle {
-    width: 18px;
-    height: 18px;
+    width: 14px;
+    height: 14px;
     border-radius: 50%;
-    border: 1.5px solid #f59e0b;
+    border: 1.2px solid #f59e0b;
     display: flex;
     align-items: center;
     justify-content: center;
   }
   .status-icon.stopped {
     background: rgba(239, 68, 68, 0.12);
-    border: 2px solid rgba(239, 68, 68, 0.22);
+    border: 1.5px solid rgba(239, 68, 68, 0.22);
     color: #ef4444;
   }
   .status-icon.stopped .inner-circle {
-    width: 18px;
-    height: 18px;
+    width: 14px;
+    height: 14px;
     border-radius: 50%;
-    border: 1.5px solid #ef4444;
+    border: 1.2px solid #ef4444;
     display: flex;
     align-items: center;
     justify-content: center;
   }
   .status-icon.info {
     background: rgba(43, 127, 255, 0.12);
-    border: 2px solid rgba(43, 127, 255, 0.22);
+    border: 1.5px solid rgba(43, 127, 255, 0.22);
     color: #2b7fff;
   }
   .status-icon.info .inner-circle {
-    width: 18px;
-    height: 18px;
+    width: 14px;
+    height: 14px;
     border-radius: 50%;
-    border: 1.5px solid #2b7fff;
+    border: 1.2px solid #2b7fff;
     display: flex;
     align-items: center;
     justify-content: center;
   }
   .status-icon svg {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
   }
   .content {
     flex: 1;
     min-width: 0;
   }
   .title {
-    font-size: 13.5px;
+    font-size: 12px;
     font-weight: 600;
     color: #ffffff;
     letter-spacing: -0.01em;
-    line-height: 1.25;
+    line-height: 1.2;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
   .body {
-    margin-top: 3px;
-    font-size: 11.5px;
-    line-height: 1.35;
+    margin-top: 1px;
+    font-size: 10px;
+    line-height: 1.25;
     color: #94a3b8;
     overflow: hidden;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
   .close-btn {
     flex: none;
-    width: 22px;
-    height: 22px;
-    border-radius: 6px;
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
     background: transparent;
     border: none;
     color: #64748b;
@@ -493,8 +463,8 @@ $notifier.Show($toast)
     color: #f1f5f9;
   }
   .close-btn svg {
-    width: 12px;
-    height: 12px;
+    width: 9px;
+    height: 9px;
   }
 </style>
 <script>

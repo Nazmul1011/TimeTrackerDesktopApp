@@ -110,13 +110,21 @@ apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   return config;
 });
 
-let refreshPromise: Promise<string | null> | null = null;
+/**
+ * "invalid": the server rejected the refresh token (login really ended).
+ * "unavailable": no answer (offline, server restarting, 5xx) — the login may
+ * still be fine, so the session must be kept.
+ */
+type RefreshResult =
+  { status: "ok"; accessToken: string } | { status: "invalid" } | { status: "unavailable" };
 
-export async function refreshAccessToken(): Promise<string | null> {
-  if (typeof window === "undefined") return null;
+let refreshPromise: Promise<RefreshResult> | null = null;
+
+async function performRefresh(): Promise<RefreshResult> {
+  if (typeof window === "undefined") return { status: "unavailable" };
 
   const refreshToken = localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN);
-  if (!refreshToken) return null;
+  if (!refreshToken) return { status: "invalid" };
 
   try {
     const response = await axios.post<ApiResponse<Pick<AuthTokens, "access_token">>>(
@@ -125,9 +133,9 @@ export async function refreshAccessToken(): Promise<string | null> {
       { headers: { "Content-Type": "application/json" } },
     );
     const newAccessToken = response.data.data.access_token;
-    if (!newAccessToken) return null;
+    if (!newAccessToken) return { status: "unavailable" };
     persistAccessToken(newAccessToken);
-    return newAccessToken;
+    return { status: "ok", accessToken: newAccessToken };
   } catch (error) {
     const status = axios.isAxiosError(error) ? error.response?.status : undefined;
     // Only wipe the session when the refresh token itself is rejected.
@@ -135,9 +143,47 @@ export async function refreshAccessToken(): Promise<string | null> {
     if (isAuthFailureStatus(status)) {
       clearPersistedTokens();
       emitSessionInvalid();
+      return { status: "invalid" };
     }
-    return null;
+    return { status: "unavailable" };
   }
+}
+
+function refreshOnce(): Promise<RefreshResult> {
+  if (!refreshPromise) {
+    refreshPromise = performRefresh().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
+
+function accessTokenExpiresSoon(token: string, skewMs = 30_000): boolean {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))) as {
+      exp?: number;
+    };
+    return typeof payload.exp !== "number" || payload.exp * 1000 - Date.now() < skewMs;
+  } catch {
+    return true;
+  }
+}
+
+export async function refreshAccessToken(): Promise<string | null> {
+  const result = await refreshOnce();
+  return result.status === "ok" ? result.accessToken : null;
+}
+
+/**
+ * A usable access token, refreshing first when the stored one is missing or
+ * about to expire. The realtime socket calls this on every (re)connect so it
+ * never presents a stale token. Returns null when signed out or unreachable.
+ */
+export async function getFreshAccessToken(): Promise<string | null> {
+  const current = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+  if (current && !accessTokenExpiresSoon(current)) return current;
+  const result = await refreshOnce();
+  return result.status === "ok" ? result.accessToken : null;
 }
 
 apiClient.interceptors.response.use(
@@ -159,19 +205,18 @@ apiClient.interceptors.response.use(
 
     originalRequest._retry = true;
 
-    if (!refreshPromise) {
-      refreshPromise = refreshAccessToken().finally(() => {
-        refreshPromise = null;
-      });
-    }
+    const refreshed = await refreshOnce();
 
-    const newAccessToken = await refreshPromise;
-
-    if (!newAccessToken) {
+    if (refreshed.status === "unavailable") {
+      // Keep the session; the caller sees the original error and can retry.
       return Promise.reject(error);
     }
 
-    originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+    if (refreshed.status === "invalid") {
+      return Promise.reject(error);
+    }
+
+    originalRequest.headers.Authorization = `Bearer ${refreshed.accessToken}`;
     return apiClient(originalRequest);
   },
 );

@@ -3,10 +3,9 @@
  */
 import { toast } from "sonner";
 import { formatElapsed } from "@/lib/dayjs";
-import { notifyToast } from "@/lib/notify";
 import { sanitizeProjectId } from "@/lib/project";
 import { dispatchTimerStopped } from "@/lib/timer-events";
-import { cancelWindowReveal, scheduleWindowRevealAfterResume } from "@/lib/window-reveal";
+import { cancelWindowReveal } from "@/lib/window-reveal";
 import { getElectronAPI, isElectron } from "@/services/electron";
 import { timerApi } from "@/services/api/timer.api";
 import { timesheetApi } from "@/services/api/timesheet.api";
@@ -43,12 +42,11 @@ export async function pauseTimer(): Promise<void> {
       const apiTimer = await timerApi.pause();
       useTimerStore.getState().hydrateFromApi(apiTimer);
       cancelWindowReveal();
-      notifyToast("warning", "Timer paused. Click Resume when you are ready to continue.");
       if (isElectron()) {
         void getElectronAPI()?.tracking.disarmIdleResume?.();
         void getElectronAPI()?.notification?.show?.({
           title: "Timer paused",
-          body: "Timer paused. Click Resume when you are ready to continue.",
+          body: "Click Resume when you are ready.",
         });
       }
     } catch (err) {
@@ -63,12 +61,10 @@ export async function resumeTimer(): Promise<void> {
     try {
       const apiTimer = await timerApi.resume();
       useTimerStore.getState().hydrateFromApi(apiTimer);
-      scheduleWindowRevealAfterResume();
-      notifyToast("success", "Timer resumed. Tracking is running.");
       if (isElectron()) {
         void getElectronAPI()?.notification?.show?.({
           title: "Timer resumed",
-          body: "Timer resumed. Tracking is running.",
+          body: "Tracking is running.",
         });
       }
     } catch (err) {

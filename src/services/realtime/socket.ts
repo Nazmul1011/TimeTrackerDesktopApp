@@ -4,6 +4,7 @@
  */
 import { io, type Socket } from "socket.io-client";
 import { STORAGE_KEYS } from "@/constants/storage";
+import { getFreshAccessToken } from "@/services/api/client";
 import type { ApiTimer } from "@/services/api/types";
 import { dispatchTimerStopped } from "@/lib/timer-events";
 import { useTimerStore } from "@/store/timer.store";
@@ -47,16 +48,33 @@ function savedSeconds(payload: TimerEventPayload): number {
   if (payload.totalDurationSeconds != null) {
     return payload.totalDurationSeconds;
   }
-  return (
-    payload.entries?.reduce((sum, entry) => sum + (entry.duration ?? 0), 0) ?? 0
-  );
+  return payload.entries?.reduce((sum, entry) => sum + (entry.duration ?? 0), 0) ?? 0;
 }
 
-function bind(
-  active: Socket,
-  names: string[],
-  handler: (payload: TimerEventPayload) => void,
-) {
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectAttempts = 0;
+
+/**
+ * socket.io never auto-reconnects after the server itself closes the socket,
+ * which is what the gateway does with an expired token. Reconnect by hand with
+ * backoff; the `auth` callback supplies a refreshed token. Stops if the user
+ * is signed out (no token can be obtained).
+ */
+function scheduleReconnect(active: Socket) {
+  if (reconnectTimer) return;
+  const delay = Math.min(30_000, 2_000 * 2 ** reconnectAttempts);
+  reconnectAttempts += 1;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    if (active !== socket || active.connected) return;
+    void getFreshAccessToken().then((fresh) => {
+      if (active !== socket || active.connected || !fresh) return;
+      active.connect();
+    });
+  }, delay);
+}
+
+function bind(active: Socket, names: string[], handler: (payload: TimerEventPayload) => void) {
   for (const name of names) {
     active.on(name, handler);
   }
@@ -68,11 +86,9 @@ export function connectRealtime(options?: {
 }): Socket | null {
   if (typeof window === "undefined") return null;
 
-  const token =
-    options?.token ?? localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+  const token = options?.token ?? localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
   const organizationId =
-    options?.organizationId ??
-    localStorage.getItem(STORAGE_KEYS.ORGANIZATION_ID);
+    options?.organizationId ?? localStorage.getItem(STORAGE_KEYS.ORGANIZATION_ID);
 
   if (!token || !organizationId) {
     return null;
@@ -82,13 +98,32 @@ export function connectRealtime(options?: {
     disconnectRealtime();
   }
 
+  // `auth` as a function runs on every (re)connect attempt. A fixed object
+  // would replay the token from first connect, which the server rejects once
+  // the 15-minute JWT expires — after any sleep or network blip.
   socket = io(`${getSocketUrl()}/realtime`, {
     autoConnect: true,
     transports: ["websocket", "polling"],
-    auth: {
-      token,
-      organizationId,
+    auth: (cb) => {
+      void getFreshAccessToken().then((fresh) => {
+        cb({
+          token: fresh ?? token,
+          organizationId: localStorage.getItem(STORAGE_KEYS.ORGANIZATION_ID) ?? organizationId,
+        });
+      });
     },
+  });
+
+  socket.on("connect", () => {
+    const active = socket;
+    // Only forget the backoff once the connection has survived a while, so a
+    // server that accepts and immediately drops us can't cause a tight loop.
+    setTimeout(() => {
+      if (active && active === socket && active.connected) reconnectAttempts = 0;
+    }, 10_000);
+  });
+  socket.on("disconnect", (reason) => {
+    if (socket && reason === "io server disconnect") scheduleReconnect(socket);
   });
 
   bind(socket, ["timer:started", "timer-started"], (payload) => {
@@ -109,9 +144,7 @@ export function connectRealtime(options?: {
     const previous = useTimerStore.getState().todayLoggedMs;
     useTimerStore.getState().setIdle();
     if (saved > 0) {
-      useTimerStore
-        .getState()
-        .setTodayLoggedSeconds(previous / 1000 + saved);
+      useTimerStore.getState().setTodayLoggedSeconds(previous / 1000 + saved);
     }
     dispatchTimerStopped({
       totalDurationSeconds: saved,
@@ -123,6 +156,11 @@ export function connectRealtime(options?: {
 }
 
 export function disconnectRealtime() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  reconnectAttempts = 0;
   if (!socket) return;
   socket.removeAllListeners();
   socket.disconnect();

@@ -2,7 +2,7 @@
  * Main-process tracking loop — screenshots while the timer is running.
  * Capture lives in Electron main so it continues if the renderer is throttled.
  */
-import { BrowserWindow } from "electron";
+import { app, BrowserWindow } from "electron";
 import log from "electron-log/main";
 import { ScreenshotService } from "../screenshots";
 import { ActivityService } from "../activity";
@@ -30,8 +30,19 @@ export type TrackingOptions = {
   idleTimeoutMs?: number;
 };
 
+/**
+ * How often the main process tells the server the timer's machine is alive.
+ * The server auto-stops a running timer after 5 minutes of silence, so this
+ * must keep firing even when the window is hidden and the renderer throttled.
+ */
+const HEARTBEAT_MS = 60_000;
+const HEARTBEAT_TIMEOUT_MS = 15_000;
+
 export class TrackingService {
   private static instance: TrackingService | null = null;
+
+  private heartbeatTimer: NodeJS.Timeout | null = null;
+  private heartbeatInFlight = false;
 
   private running = false;
   private auth: TrackingAuth | null = null;
@@ -51,7 +62,6 @@ export class TrackingService {
   private awaitingIdleResume = false;
   private idleResumeTimer: NodeJS.Timeout | null = null;
   private lastIdleResumeEmitAt = 0;
-  private scheduleRevealOnNextStart = false;
   private lastCaptureAt = 0;
 
   static getInstance(): TrackingService {
@@ -118,6 +128,7 @@ export class TrackingService {
     this.running = true;
     this.idlePauseInFlight = false;
     this.disarmIdleResume();
+    this.startHeartbeat();
 
     ActivityService.getInstance().start();
     const idleMs = this.options.idleTimeoutMs ?? 0;
@@ -137,15 +148,6 @@ export class TrackingService {
     log.info(
       `[TrackingService] started — screenshots every ${Math.round(this.options.screenshotIntervalMs / 1000)}s`,
     );
-
-    if (this.scheduleRevealOnNextStart) {
-      this.scheduleRevealOnNextStart = false;
-      const revealMs = Math.max(60_000, this.options.idleTimeoutMs ?? 5 * 60_000);
-      WindowRevealService.getInstance().scheduleAfterResume(revealMs);
-      log.info(
-        `[TrackingService] window reveal scheduled after idle resume (${Math.round(revealMs / 1000)}s)`,
-      );
-    }
 
     return { ok: true, intervalMs: this.options.screenshotIntervalMs };
   }
@@ -177,6 +179,7 @@ export class TrackingService {
       this.stopTimer = null;
       this.running = false;
       this.stopTimersOnly();
+      this.stopHeartbeat();
       InputActivityMonitor.getInstance().stop();
       ActivityService.getInstance().stop();
       if (this.awaitingIdleResume) {
@@ -392,7 +395,7 @@ export class TrackingService {
       mimeType: string;
       activityPercent: number;
     },
-  ): { body: Buffer; contentType: string } {
+  ): { body: Buffer<ArrayBuffer>; contentType: string } {
     const boundary = `----Gr8rScreenshot${Date.now()}${process.pid}`;
     const chunks: Buffer[] = [];
     const pushField = (name: string, value: string) => {
@@ -477,6 +480,12 @@ export class TrackingService {
     this.idlePauseInFlight = true;
     this.stopTimersOnly();
 
+    // The monitor fires after a full idle window of no input, so the idle
+    // stretch began that long ago. Capture it before the awaits below so the
+    // renderer can pause the timer as of then instead of as of "now".
+    const idleMs = this.options.idleTimeoutMs ?? this.options.screenshotIntervalMs;
+    const idleSince = new Date(Date.now() - idleMs).toISOString();
+
     log.info(`[TrackingService] idle for one screenshot interval — pausing timer`);
 
     if (this.options.enableScreenshots) {
@@ -489,15 +498,11 @@ export class TrackingService {
       }
     }
 
-    const idleMs = this.options.idleTimeoutMs ?? this.options.screenshotIntervalMs;
+    NotificationService.getInstance().showTimerIdlePaused(idleMs);
 
-    const notifyResult = NotificationService.getInstance().showTimerIdlePaused(idleMs);
-    if (!notifyResult.ok) {
-      log.warn("[TrackingService] idle notification failed", notifyResult.message);
-    }
-
-    this.scheduleRevealOnNextStart = true;
     this.running = false;
+    // The timer is about to be paused; a paused timer is never auto-stopped.
+    this.stopHeartbeat();
     this.awaitingIdleResume = true;
     InputActivityMonitor.getInstance().stop();
     ActivityService.getInstance().stop();
@@ -505,6 +510,7 @@ export class TrackingService {
 
     this.emitToRenderer("tracking:idle-timeout", {
       intervalMs: idleMs,
+      idleSince,
       activityPercent: InputActivityMonitor.getInstance().peekPercent(),
     });
   }
@@ -535,17 +541,65 @@ export class TrackingService {
     this.clearIdleResumeWatch();
     this.lastIdleResumeEmitAt = Date.now();
     log.info("[TrackingService] input after idle pause — requesting timer resume");
-    const notifyResult = NotificationService.getInstance().showTimerIdleResumed();
-    if (!notifyResult.ok) {
-      log.warn("[TrackingService] resume notification failed", notifyResult.message);
-    }
-    this.emitToRenderer("tracking:idle-resume", {});
+    NotificationService.getInstance().showTimerIdleResumed();
+    this.emitToRenderer("tracking:idle-resume", {
+      resumedAt: new Date().toISOString(),
+    });
   }
 
   private clearIdleResumeWatch() {
     if (this.idleResumeTimer) {
       clearInterval(this.idleResumeTimer);
       this.idleResumeTimer = null;
+    }
+  }
+
+  private startHeartbeat() {
+    this.stopHeartbeat();
+    void this.sendHeartbeat();
+    this.heartbeatTimer = setInterval(() => {
+      void this.sendHeartbeat();
+    }, HEARTBEAT_MS);
+  }
+
+  private stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  /** Failures only log: one missed beat is fine, the server allows five. */
+  private async sendHeartbeat(): Promise<void> {
+    if (this.heartbeatInFlight) return;
+    if (!this.auth?.accessToken || !this.auth.organizationId) return;
+    this.heartbeatInFlight = true;
+    try {
+      const post = () =>
+        fetch(`${this.auth!.apiBaseUrl.replace(/\/$/, "")}/activity/heartbeat`, {
+          method: "POST",
+          headers: {
+            ...this.buildAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            deviceId: this.auth!.deviceId,
+            version: app.getVersion(),
+          }),
+          signal: AbortSignal.timeout(HEARTBEAT_TIMEOUT_MS),
+        });
+
+      let response = await post();
+      if (response.status === 401 && (await this.refreshAccessToken())) {
+        response = await post();
+      }
+      if (!response.ok) {
+        log.warn(`[TrackingService] heartbeat rejected: ${response.status}`);
+      }
+    } catch (error) {
+      log.warn("[TrackingService] heartbeat failed", error);
+    } finally {
+      this.heartbeatInFlight = false;
     }
   }
 
