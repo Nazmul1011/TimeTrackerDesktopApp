@@ -64,12 +64,15 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    WindowRevealService.getInstance().revealNow();
+    WindowRevealService.getInstance().revealNow({ force: true });
   });
 }
 
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
+/** macOS fires `activate` in the same moment as minimize; ignore that restore. */
+let restoreBlockedUntil = 0;
+let holdingMinimize = false;
 
 async function bootstrap(): Promise<void> {
   applySecurityDefaults();
@@ -89,6 +92,21 @@ async function bootstrap(): Promise<void> {
     log.info("[main] window hidden (tracking continues)");
   });
 
+  mainWindow.on("minimize", () => {
+    if (holdingMinimize) return;
+    restoreBlockedUntil = Date.now() + 1000;
+    log.info("[main] window minimized");
+  });
+
+  mainWindow.on("restore", () => {
+    if (holdingMinimize || Date.now() >= restoreBlockedUntil) return;
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    holdingMinimize = true;
+    mainWindow.minimize();
+    holdingMinimize = false;
+    log.info("[main] kept window minimized");
+  });
+
   createAppMenu(mainWindow);
   createTray(mainWindow);
   initAutoUpdater(mainWindow);
@@ -105,9 +123,11 @@ app.whenReady().then(() => {
       return;
     }
     // Do not go through WindowRevealService — steal-focus + dock.show blanks the tile.
+    // The minimize button also emits activate; leave the window down until a later click.
+    if (Date.now() < restoreBlockedUntil) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
-    if (!mainWindow.isVisible()) mainWindow.show();
-    mainWindow.focus();
+    else if (!mainWindow.isVisible()) mainWindow.show();
+    if (!mainWindow.isMinimized()) mainWindow.focus();
   });
 });
 

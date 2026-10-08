@@ -52,9 +52,8 @@ export function createMainWindow(): BrowserWindow {
   });
 
   const reveal = () => {
-    if (win.isDestroyed()) return;
+    if (win.isDestroyed() || win.isMinimized()) return;
     if (!win.isVisible()) win.show();
-    if (win.isMinimized()) win.restore();
     win.focus();
   };
 

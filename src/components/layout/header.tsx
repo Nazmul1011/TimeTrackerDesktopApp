@@ -20,6 +20,7 @@ import { useNotificationNavigation } from "@/hooks/useNotificationNavigation";
 import { useNotifications } from "@/hooks/useNotifications";
 import { cn } from "@/lib/utils";
 import { signOutSession } from "@/lib/session";
+import { useTimerStore } from "@/store/timer.store";
 
 const headerIconClass =
   "inline-flex size-8 shrink-0 items-center justify-center rounded-lg p-2 outline-none transition-colors duration-150 hover:bg-[#f5f5f5] focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35 active:bg-[#efefef]";
@@ -29,6 +30,8 @@ export function Header() {
   const { notifications, unreadCount, isLoading, error, loadNotifications, markAsRead } =
     useNotifications({ poll: true });
   const { navigateFromNotification } = useNotificationNavigation();
+  // Red logo when paused or stopped, so it never reads as "still tracking".
+  const isTracking = useTimerStore((s) => s.timer.status === "running");
 
   useEffect(() => {
     void loadNotifications({ silent: true });
@@ -48,7 +51,7 @@ export function Header() {
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="/figma/logo.svg"
+            src={isTracking ? "/figma/logo.svg" : "/figma/logo-red.svg"}
             alt="Gr8r"
             className="size-full object-cover"
             width={32}

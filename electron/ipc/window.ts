@@ -22,7 +22,7 @@ export function registerWindowIpc(): void {
   });
 
   ipcMain.handle("window:revealNow", async () => {
-    WindowRevealService.getInstance().revealNow();
+    WindowRevealService.getInstance().revealNow({ force: true });
     log.info("[ipc:window] revealNow");
     return { ok: true };
   });

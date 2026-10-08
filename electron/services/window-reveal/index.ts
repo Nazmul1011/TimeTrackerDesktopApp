@@ -40,10 +40,15 @@ export class WindowRevealService {
   private lastRevealAt = 0;
 
   /** Immediately show and focus the main window (platform-aware). */
-  revealNow(options?: { bounce?: boolean }): void {
+  revealNow(options?: { bounce?: boolean; force?: boolean }): void {
     const win = this.getMainWindow();
     if (!win) {
       log.warn("[WindowRevealService] no window to reveal");
+      return;
+    }
+
+    if (win.isMinimized() && options?.force !== true) {
+      log.info("[WindowRevealService] window minimized — leaving it minimized");
       return;
     }
 

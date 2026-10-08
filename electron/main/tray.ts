@@ -7,6 +7,7 @@ import path from "path";
 import log from "electron-log/main";
 import { findExistingPath, getResourcesRoot, resolveAppIconPaths } from "../utils";
 import { WindowRevealService } from "../services/window-reveal";
+import { applyTimerStatusIcon } from "../utils/dock-icon";
 
 type TrayTimerStatus = "idle" | "running" | "paused";
 
@@ -24,23 +25,30 @@ const trayState: TrayUiState = {
   timerStatus: "idle",
 };
 
-function loadTrayIcon(): Electron.NativeImage {
+/** Brand icon while tracking; red when paused or stopped so it can't be mistaken for running. */
+function trayIconName(): string {
+  return trayState.authenticated && trayState.timerStatus === "running"
+    ? "tray-icon"
+    : "tray-icon-red";
+}
+
+function loadTrayIcon(name: string): Electron.NativeImage {
   const root = getResourcesRoot();
   const candidates =
     process.platform === "win32"
       ? [
-          path.join(root, "tray", "tray-icon.ico"),
+          path.join(root, "tray", `${name}.ico`),
           path.join(root, "icons", "icon.ico"),
-          path.join(root, "tray", "tray-icon.png"),
+          path.join(root, "tray", `${name}.png`),
           path.join(root, "icons", "icon.png"),
         ]
       : process.platform === "darwin"
         ? [
-            path.join(root, "tray", "tray-icon.png"),
+            path.join(root, "tray", `${name}.png`),
             path.join(root, "icons", "icon.png"),
             path.join(root, "icons", "256x256.png"),
           ]
-        : resolveAppIconPaths();
+        : [path.join(root, "tray", `${name}.png`), ...resolveAppIconPaths()];
 
   const iconPath = findExistingPath(candidates);
   if (iconPath) {
@@ -60,12 +68,24 @@ function loadTrayIcon(): Electron.NativeImage {
   return nativeImage.createEmpty();
 }
 
+let shownIconName: string | null = null;
+
+function refreshTrayIcon(): void {
+  if (!tray) return;
+  const name = trayIconName();
+  if (name === shownIconName) return;
+  const icon = loadTrayIcon(name);
+  if (icon.isEmpty()) return;
+  tray.setImage(icon);
+  shownIconName = name;
+}
+
 function showMainWindow(mainWindow: BrowserWindow): void {
   if (mainWindow.isDestroyed()) {
-    WindowRevealService.getInstance().revealNow();
+    WindowRevealService.getInstance().revealNow({ force: true });
     return;
   }
-  WindowRevealService.getInstance().revealNow();
+  WindowRevealService.getInstance().revealNow({ force: true });
 }
 
 function targetWindow(): BrowserWindow | undefined {
@@ -148,6 +168,8 @@ export function updateTrayState(partial: Partial<TrayUiState>): void {
   ) {
     trayState.timerStatus = partial.timerStatus;
   }
+  refreshTrayIcon();
+  applyTimerStatusIcon(trayState.authenticated ? trayState.timerStatus : "idle", targetWindow());
   rebuildMenu();
 }
 
@@ -166,7 +188,8 @@ export function registerTrayIpc(): void {
 export function createTray(mainWindow: BrowserWindow): Tray | null {
   try {
     mainWindowRef = mainWindow;
-    tray = new Tray(loadTrayIcon());
+    shownIconName = trayIconName();
+    tray = new Tray(loadTrayIcon(shownIconName));
     tray.setToolTip("Gr8r Time Tracker");
     rebuildMenu();
 

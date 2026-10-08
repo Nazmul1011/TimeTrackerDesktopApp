@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useOrgTimezone } from "@/hooks/useOrgTimezone";
 import { formatElapsed } from "@/lib/dayjs";
-import { TIMER_STOPPED_EVENT } from "@/lib/timer-events";
+import { TIMER_STOPPED_EVENT, dispatchTimerStopped } from "@/lib/timer-events";
 import {
   pauseTimer,
   resetDayTimer,
@@ -124,6 +124,9 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
           missingTimerStreakRef.current += 1;
           if (missingTimerStreakRef.current >= 2) {
             setIdle();
+            // Stopped on the server (auto-stop while asleep/offline): the
+            // session is now a saved entry, so reload today's total.
+            dispatchTimerStopped();
           }
           return;
         }

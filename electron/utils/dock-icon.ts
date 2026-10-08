@@ -2,9 +2,10 @@
  * Keep the custom Dock icon applied. `electron:dev` runs stock Electron.app,
  * so macOS reverts to the host/window icon after show, focus, or bounce.
  */
-import { app, nativeImage, type NativeImage } from "electron";
+import { app, nativeImage, type BrowserWindow, type NativeImage } from "electron";
 import log from "electron-log/main";
-import { findExistingPath, resolveAppIconPaths } from "./index";
+import path from "path";
+import { findExistingPath, getResourcesRoot, resolveAppIconPaths } from "./index";
 
 let cached: NativeImage | null = null;
 let followUp: NodeJS.Timeout | null = null;
@@ -47,4 +48,40 @@ export function applyDockIconSoon(): void {
     followUp = null;
     applyDockIcon();
   }, 350);
+}
+
+function loadWindowIcon(red: boolean): NativeImage | null {
+  const root = getResourcesRoot();
+  const candidates = red
+    ? process.platform === "win32"
+      ? [path.join(root, "icons", "icon-red.ico"), path.join(root, "icons", "icon-red.png")]
+      : [path.join(root, "icons", "icon-red.png"), path.join(root, "icons", "256x256-red.png")]
+    : resolveAppIconPaths();
+  const iconPath = findExistingPath(candidates);
+  if (!iconPath) return null;
+  const image = nativeImage.createFromPath(iconPath);
+  return image.isEmpty() ? null : image;
+}
+
+/**
+ * Show on the app icon itself whether the timer is tracking.
+ * Windows/Linux: taskbar + window icon turn red when paused or stopped.
+ * macOS: a red Dock badge instead — swapping the Dock icon at runtime breaks
+ * the packaged tile (see applyDockIcon).
+ */
+export function applyTimerStatusIcon(
+  status: "idle" | "running" | "paused",
+  win: BrowserWindow | undefined,
+): void {
+  try {
+    if (process.platform === "darwin") {
+      app.dock?.setBadge(status === "running" ? "" : status === "paused" ? "Paused" : "Stopped");
+      return;
+    }
+    if (!win || win.isDestroyed()) return;
+    const image = loadWindowIcon(status !== "running");
+    if (image) win.setIcon(image);
+  } catch (error) {
+    log.warn("[icon] status icon failed", error);
+  }
 }

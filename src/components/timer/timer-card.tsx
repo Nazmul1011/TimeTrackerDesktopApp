@@ -153,6 +153,7 @@ export function TimerCard() {
       weekday: string;
       monthDay: string;
       isToday: boolean;
+      isWeekend: boolean;
     }> = [];
     const currentTodayYmd = todayDate || todayInZone(orgTimezone);
     const startMs = ymdToUtc(dateRange.start).getTime();
@@ -171,11 +172,13 @@ export function TimerCard() {
         month: "short",
         day: "numeric",
       }).format(date);
+      const weekdayIndex = date.getUTCDay();
       days.push({
         ymd,
         weekday,
         monthDay,
         isToday: ymd === currentTodayYmd,
+        isWeekend: weekdayIndex === 0 || weekdayIndex === 6,
       });
     }
     return days;
@@ -255,14 +258,17 @@ export function TimerCard() {
     return () => window.removeEventListener(TIMER_STOPPED_EVENT, handler);
   }, [loadTodayByProject, loadWeekTotals]);
 
+  const scrollStripToToday = useCallback(() => {
+    const container = stripRef.current;
+    const card = todayCardRef.current;
+    if (!container || !card) return;
+    const scrollTarget = card.offsetLeft - container.offsetWidth / 2 + card.offsetWidth / 2;
+    container.scrollTo({ left: Math.max(0, scrollTarget), behavior: "smooth" });
+  }, []);
+
   useEffect(() => {
-    if (todayCardRef.current && stripRef.current) {
-      const container = stripRef.current;
-      const card = todayCardRef.current;
-      const scrollTarget = card.offsetLeft - container.offsetWidth / 2 + card.offsetWidth / 2;
-      container.scrollTo({ left: Math.max(0, scrollTarget), behavior: "smooth" });
-    }
-  }, [dateRange, todayDate]);
+    scrollStripToToday();
+  }, [dateRange, todayDate, scrollStripToToday]);
 
   const clientOptions = useMemo(() => {
     const names = new Set<string>();
@@ -604,13 +610,19 @@ export function TimerCard() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <div className="ml-auto flex shrink-0 items-center gap-1 text-xs leading-4">
+        <button
+          type="button"
+          aria-label="Show today's time"
+          title="Show today's time"
+          onClick={scrollStripToToday}
+          className="ml-auto flex shrink-0 items-center gap-1 rounded-md text-xs leading-4 outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35"
+        >
           <span>
             <span className="font-medium text-[#1e2939]">{dateLabel}</span>
             <span className="text-[#4a5565]">,</span>
           </span>
           <span className="text-[#4a5565]">{dateShort}</span>
-        </div>
+        </button>
       </div>
 
       <div className="mt-8 flex flex-col items-center gap-4 pb-2">
@@ -663,18 +675,10 @@ export function TimerCard() {
               Pause
             </Button>
             <Button
-              className="h-9 gap-1.5 rounded-lg bg-[#f4323c] px-5 text-sm font-medium text-white hover:bg-[#e12d36]"
+              className="h-9 rounded-lg bg-[#f4323c] px-5 text-sm font-medium text-white hover:bg-[#e12d36]"
               disabled={isSyncing}
               onClick={() => void stop()}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/figma/icon-play.svg"
-                alt=""
-                className="size-3.5 brightness-0 invert"
-                width={14}
-                height={14}
-              />
               Stop
             </Button>
           </div>
@@ -698,18 +702,10 @@ export function TimerCard() {
               Resume
             </Button>
             <Button
-              className="h-9 gap-1.5 rounded-lg bg-[#f4323c] px-5 text-sm font-medium text-white hover:bg-[#e12d36]"
+              className="h-9 rounded-lg bg-[#f4323c] px-5 text-sm font-medium text-white hover:bg-[#e12d36]"
               disabled={isSyncing}
               onClick={() => void stop()}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/figma/icon-play.svg"
-                alt=""
-                className="size-3.5 brightness-0 invert"
-                width={14}
-                height={14}
-              />
               Stop
             </Button>
           </div>
@@ -736,7 +732,7 @@ export function TimerCard() {
           const daySeconds = (weekDailyTotals[day.ymd] ?? 0) + live;
           const isTimerActiveToday = day.isToday && (isRunning || isPaused);
           const isPastDay = day.ymd < (todayDate || "");
-          const isUnderEightHours = isPastDay && daySeconds < 8 * 3600;
+          const isUnderEightHours = isPastDay && !day.isWeekend && daySeconds < 8 * 3600;
 
           return (
             <div

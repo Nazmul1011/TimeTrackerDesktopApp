@@ -121,7 +121,7 @@ export class NotificationService {
       };
 
       notification.on("click", () => {
-        WindowRevealService.getInstance().revealNow();
+        WindowRevealService.getInstance().revealNow({ force: true });
         cleanup();
       });
       notification.on("close", cleanup);
@@ -537,7 +537,7 @@ $notifier.Show($toast)
       } else if (url.startsWith("custom://reveal")) {
         event.preventDefault();
         this.closeOverlay();
-        WindowRevealService.getInstance().revealNow();
+        WindowRevealService.getInstance().revealNow({ force: true });
       }
     });
 
