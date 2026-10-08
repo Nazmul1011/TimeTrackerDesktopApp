@@ -4,7 +4,9 @@
 "use client";
 
 import { useCallback, useEffect } from "react";
+import { dispatchTimerStopped } from "@/lib/timer-events";
 import { timerApi } from "@/services/api/timer.api";
+import type { ApiTimer } from "@/services/api/types";
 import { useAuthStore } from "@/store/auth.store";
 import { useTimerStore } from "@/store/timer.store";
 
@@ -15,13 +17,18 @@ export function useTimerSync(options?: { onFocus?: boolean; intervalMs?: number 
 
   const sync = useCallback(async () => {
     if (!isAuthenticated || !organizationId) return;
+    const apply = (apiTimer: ApiTimer | null) => {
+      const wasActive = useTimerStore.getState().timer.status !== "idle";
+      hydrateFromApi(apiTimer);
+      // Session ended on the server while we were away (sleep/offline): it is
+      // now a saved entry, so reload today's total.
+      if (!apiTimer && wasActive) dispatchTimerStopped();
+    };
     try {
-      const synced = await timerApi.sync();
-      hydrateFromApi(synced);
+      apply(await timerApi.sync());
     } catch {
       try {
-        const current = await timerApi.current();
-        hydrateFromApi(current);
+        apply(await timerApi.current());
       } catch {
         // keep local state
       }
