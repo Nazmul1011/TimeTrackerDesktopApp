@@ -15,6 +15,7 @@ import { notifyToast } from "@/lib/notify";
 import { handleIdlePause, handleIdleResume } from "@/lib/idle-timer-sync";
 import { getElectronAPI, isElectron } from "@/services/electron";
 import { useAuthStore } from "@/store/auth.store";
+import { useScreenshotStatusStore } from "@/store/screenshot-status.store";
 import { useSettingsStore } from "@/store/settings.store";
 import { useTimerStore } from "@/store/timer.store";
 
@@ -230,8 +231,10 @@ export function useTrackingAgent() {
 
     firstUploadToastRef.current = false;
     let cancelled = false;
+    useScreenshotStatusStore.getState().clearFailure();
 
     const unsubUploaded = api.tracking.onUploaded((payload) => {
+      useScreenshotStatusStore.getState().clearFailure();
       window.dispatchEvent(new CustomEvent(SCREENSHOT_CAPTURED_EVENT, { detail: payload }));
       if (process.env.NEXT_PUBLIC_APP_ENV !== "production" && !firstUploadToastRef.current) {
         firstUploadToastRef.current = true;
@@ -241,6 +244,7 @@ export function useTrackingAgent() {
 
     const unsubFailed = api.tracking.onFailed((payload) => {
       console.warn("[tracking] screenshot failed", payload);
+      useScreenshotStatusStore.getState().setFailure(payload?.message || "Screenshot failed");
       if (process.env.NEXT_PUBLIC_APP_ENV !== "production") {
         notifyToast(
           "error",

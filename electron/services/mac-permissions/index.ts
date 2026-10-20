@@ -8,10 +8,13 @@
  */
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { desktopCapturer, shell, systemPreferences } from "electron";
+import { app, desktopCapturer, shell, systemPreferences } from "electron";
 import log from "electron-log/main";
 
 const execFileAsync = promisify(execFile);
+
+/** Must match `appId` in electron-builder.yml. */
+const APP_BUNDLE_ID = "com.gr8r.timetracker";
 
 export type MacPermissionStatus =
   "granted" | "denied" | "restricted" | "unknown" | "not-determined";
@@ -106,6 +109,31 @@ export class MacPermissions {
     } catch (error) {
       log.warn("[MacPermissions] open screen settings failed", error);
     }
+  }
+
+  /**
+   * Clears this app's Screen Recording entry (same as `tccutil reset ScreenCapture <id>`)
+   * and relaunches, so macOS asks again. Fixes a toggle that looks ON but belongs to an
+   * older/differently signed copy. No sudo needed for the app's own bundle id.
+   */
+  static async resetScreenRecordingAndRelaunch(): Promise<{ ok: boolean; message?: string }> {
+    if (process.platform !== "darwin") return { ok: false, message: "macOS only" };
+    if (!app.isPackaged) {
+      return { ok: false, message: "Only available in the installed app" };
+    }
+    try {
+      await execFileAsync("/usr/bin/tccutil", ["reset", "ScreenCapture", APP_BUNDLE_ID], {
+        timeout: 10_000,
+      });
+      log.info("[MacPermissions] Screen Recording permission reset — relaunching");
+    } catch (error) {
+      const err = error as { message?: string };
+      log.warn("[MacPermissions] tccutil reset failed", error);
+      return { ok: false, message: err.message || "Could not reset permission" };
+    }
+    app.relaunch();
+    app.quit();
+    return { ok: true };
   }
 
   static async openAccessibilitySettings(): Promise<void> {

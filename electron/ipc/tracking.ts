@@ -79,6 +79,10 @@ export function registerTrackingIpc(): void {
     return { ok: true };
   });
 
+  ipcMain.handle("tracking:resetScreenRecording", async () => {
+    return MacPermissions.resetScreenRecordingAndRelaunch();
+  });
+
   ipcMain.handle("tracking:retryScreenshots", async () => {
     return tracking.retryScreenshots();
   });

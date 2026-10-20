@@ -11,6 +11,7 @@ import { useOrgTimezone } from "@/hooks/useOrgTimezone";
 import { screenshotApi, resolveScreenshotUrl } from "@/services/api/screenshot.api";
 import { getElectronAPI, isElectron } from "@/services/electron";
 import { useAuthStore } from "@/store/auth.store";
+import { useScreenshotStatusStore } from "@/store/screenshot-status.store";
 import { useTimerStore } from "@/store/timer.store";
 import { ScreenshotCard, type ScreenshotItem } from "@/components/screenshots/screenshot-card";
 
@@ -42,7 +43,12 @@ export function ScreenshotGrid() {
   const [items, setItems] = useState<ScreenshotItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [captureBlocked, setCaptureBlocked] = useState(false);
+  const failure = useScreenshotStatusStore((s) => s.failure);
+  const clearFailure = useScreenshotStatusStore((s) => s.clearFailure);
+  const captureBlocked = failure?.kind === "permission";
+  const uploadFailure = failure?.kind === "upload" ? failure.message : null;
+  const [resettingPermission, setResettingPermission] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
   const loadedOnceRef = useRef(false);
 
   const reload = useCallback(
@@ -130,24 +136,38 @@ export function ScreenshotGrid() {
     return () => window.clearInterval(id);
   }, [reload]);
 
-  useEffect(() => {
-    if (!isElectron()) return;
-    const api = getElectronAPI();
-    if (!api?.tracking?.onFailed) return;
-    const unsub = api.tracking.onFailed((payload) => {
-      const message = payload?.message || "";
-      if (/screen recording/i.test(message)) {
-        setCaptureBlocked(true);
-      }
-    });
-    const unsubUploaded = api.tracking.onUploaded(() => {
-      setCaptureBlocked(false);
-    });
-    return () => {
-      unsub();
-      unsubUploaded();
-    };
-  }, []);
+  const retryScreenshots = () => {
+    clearFailure();
+    void getElectronAPI()?.tracking.retryScreenshots?.();
+  };
+
+  const handleResetPermission = async () => {
+    setResettingPermission(true);
+    setResetError(null);
+    const result = await getElectronAPI()?.tracking.resetScreenRecording?.();
+    if (!result?.ok) {
+      setResettingPermission(false);
+      setResetError(result?.message || "Could not reset permission");
+    }
+  };
+
+  const uploadFailureNotice = uploadFailure ? (
+    <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-center text-xs text-red-600">
+      <p>Screenshot could not be uploaded: {uploadFailure}</p>
+      <p className="mt-1 text-[var(--text-muted)]">
+        The app keeps trying on the next interval. Check your internet connection.
+      </p>
+      {isElectron() ? (
+        <button
+          type="button"
+          className="mt-2 rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--text-subtle)]"
+          onClick={retryScreenshots}
+        >
+          Try again
+        </button>
+      ) : null}
+    </div>
+  ) : null;
 
   const handleRequestDelete = async (id: string) => {
     setItems((prev) => prev.map((s) => (s.id === id ? { ...s, deleteRequested: true } : s)));
@@ -176,42 +196,59 @@ export function ScreenshotGrid() {
     );
   }
 
-  if (!items.length) {
-    if (captureBlocked) {
-      return (
-        <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-4 text-center text-xs text-[var(--text-muted)]">
-          <p>
-            Turn on <span className="font-medium text-[var(--text-subtle)]">Gr8r Time Tracker</span>{" "}
-            in Screen Recording (both rows if you see two), then quit from the menu-bar{" "}
-            <span className="font-medium text-[var(--text-subtle)]">g</span> and open the app again.
-            The system dialog should appear only once.
-          </p>
-          {isElectron() ? (
-            <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-              <button
-                type="button"
-                className="rounded-lg bg-[var(--brand)] px-3 py-1.5 text-xs font-medium text-white"
-                onClick={() => {
-                  void getElectronAPI()?.tracking.openScreenRecording?.();
-                }}
-              >
-                Open Screen Recording settings
-              </button>
-              <button
-                type="button"
-                className="rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--text-subtle)]"
-                onClick={() => {
-                  setCaptureBlocked(false);
-                  void getElectronAPI()?.tracking.retryScreenshots?.();
-                }}
-              >
-                Try again
-              </button>
-            </div>
-          ) : null}
+  const permissionNotice = captureBlocked ? (
+    <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-4 text-center text-xs text-[var(--text-muted)]">
+      <p>
+        Turn on <span className="font-medium text-[var(--text-subtle)]">Gr8r Time Tracker</span> in
+        Screen Recording (both rows if you see two), then quit from the menu-bar{" "}
+        <span className="font-medium text-[var(--text-subtle)]">g</span> and open the app again. The
+        system dialog should appear only once.
+      </p>
+      {isElectron() ? (
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+          <button
+            type="button"
+            className="rounded-lg bg-[var(--brand)] px-3 py-1.5 text-xs font-medium text-white"
+            onClick={() => {
+              void getElectronAPI()?.tracking.openScreenRecording?.();
+            }}
+          >
+            Open Screen Recording settings
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--text-subtle)]"
+            onClick={retryScreenshots}
+          >
+            Try again
+          </button>
         </div>
-      );
-    }
+      ) : null}
+      {isElectron() ? (
+        <div className="mt-4 border-t border-[var(--border-subtle)] pt-3">
+          <p>
+            Already turned it on and still seeing this? Click{" "}
+            <span className="font-medium text-[var(--text-subtle)]">Fix permission</span>. The app
+            restarts, then click <span className="font-medium">Allow</span> when macOS asks and
+            start the timer again.
+          </p>
+          <button
+            type="button"
+            disabled={resettingPermission}
+            className="mt-2 rounded-lg bg-[var(--brand)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+            onClick={() => void handleResetPermission()}
+          >
+            {resettingPermission ? "Restarting…" : "Fix permission"}
+          </button>
+          {resetError ? <p className="mt-2 text-red-500">{resetError}</p> : null}
+        </div>
+      ) : null}
+    </div>
+  ) : null;
+
+  if (!items.length) {
+    if (permissionNotice) return permissionNotice;
+    if (uploadFailureNotice) return uploadFailureNotice;
     if (timerStatus === "running") {
       return (
         <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-4 text-center text-xs text-[var(--text-muted)]">
@@ -227,10 +264,14 @@ export function ScreenshotGrid() {
   }
 
   return (
-    <div className="grid grid-cols-2 gap-2">
-      {items.map((item) => (
-        <ScreenshotCard key={item.id} item={item} onRequestDelete={handleRequestDelete} />
-      ))}
+    <div className="space-y-2">
+      {permissionNotice}
+      {uploadFailureNotice}
+      <div className="grid grid-cols-2 gap-2">
+        {items.map((item) => (
+          <ScreenshotCard key={item.id} item={item} onRequestDelete={handleRequestDelete} />
+        ))}
+      </div>
     </div>
   );
 }

@@ -64,6 +64,7 @@ const electronAPI = {
     disarmIdleResume: () => ipcRenderer.invoke("tracking:disarmIdleResume"),
     openScreenRecording: () => ipcRenderer.invoke("tracking:openScreenRecording"),
     retryScreenshots: () => ipcRenderer.invoke("tracking:retryScreenshots"),
+    resetScreenRecording: () => ipcRenderer.invoke("tracking:resetScreenRecording"),
   },
   // Activity
   activity: {

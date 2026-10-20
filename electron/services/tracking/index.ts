@@ -222,13 +222,9 @@ export class TrackingService {
       return;
     }
     this.firstShotTimer = setTimeout(() => {
-      void this.captureAndUpload().then((result) => {
-        if (
-          !result.ok ||
-          gen !== this.screenshotLoopGen ||
-          !this.running ||
-          !this.options.enableScreenshots
-        ) {
+      // A failed upload must not end the loop; a Screen Recording block bumps the gen instead.
+      void this.captureAndUpload().then(() => {
+        if (gen !== this.screenshotLoopGen || !this.running || !this.options.enableScreenshots) {
           return;
         }
         this.screenshotTimer = setInterval(() => {

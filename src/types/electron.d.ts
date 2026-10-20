@@ -86,6 +86,7 @@ export interface ElectronAPI {
     disarmIdleResume: () => Promise<{ ok: boolean }>;
     openScreenRecording: () => Promise<{ ok: boolean }>;
     retryScreenshots: () => Promise<{ ok: boolean; message?: string }>;
+    resetScreenRecording: () => Promise<{ ok: boolean; message?: string }>;
   };
   notification: {
     show: (payload: {
