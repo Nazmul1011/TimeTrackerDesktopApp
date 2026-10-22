@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
+import { DARK_INK_INVERT } from "@/components/icons/figma-glyph";
 import { dispatchTimerStopped } from "@/lib/timer-events";
 import { timerApi } from "@/services/api/timer.api";
 import { connectRealtime, disconnectRealtime } from "@/services/realtime/socket";
@@ -78,8 +79,10 @@ export function WorkspaceSelector() {
 
   if (!current) {
     return (
-      <div className="flex items-center gap-2 rounded-full border border-[#e6e6e6] bg-[#f5f5f5] px-2 py-1.5">
-        <span className="max-w-[100px] truncate text-sm font-medium text-[#1e2939]">No org</span>
+      <div className="flex items-center gap-2 rounded-full border border-[#e6e6e6] bg-[#f5f5f5] px-2 py-1.5 dark:border-[#334155] dark:bg-[#1e293b]">
+        <span className="max-w-[100px] truncate text-sm font-medium text-[#1e2939] dark:text-[#f1f5f9]">
+          No org
+        </span>
       </div>
     );
   }
@@ -89,7 +92,7 @@ export function WorkspaceSelector() {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex items-center gap-2 rounded-full border border-[#e6e6e6] bg-[#f5f5f5] px-2 py-1.5 outline-none transition-colors duration-150 hover:bg-[#efefef] focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35 data-[state=open]:bg-[#efefef]"
+          className="flex items-center gap-2 rounded-full border border-[#e6e6e6] bg-[#f5f5f5] px-2 py-1.5 outline-none transition-colors duration-150 hover:bg-[#efefef] focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35 data-[state=open]:bg-[#efefef] dark:border-[#334155] dark:bg-[#1e293b] dark:hover:bg-[#334155] dark:data-[state=open]:bg-[#334155]"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -99,14 +102,14 @@ export function WorkspaceSelector() {
             width={16}
             height={16}
           />
-          <span className="max-w-[100px] truncate text-sm font-medium text-[#1e2939]">
+          <span className="max-w-[100px] truncate text-sm font-medium text-[#1e2939] dark:text-[#f1f5f9]">
             {current.name}
           </span>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/figma/icon-chevron-16.svg"
             alt=""
-            className="size-4 opacity-70"
+            className={`size-4 opacity-70 ${DARK_INK_INVERT}`}
             width={16}
             height={16}
           />

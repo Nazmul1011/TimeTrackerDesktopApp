@@ -2,12 +2,13 @@
  * BrowserWindow factory.
  * Creates the main application window with context isolation enabled.
  */
-import { app, BrowserWindow, nativeImage, shell } from "electron";
+import { app, BrowserWindow, nativeImage, nativeTheme, shell } from "electron";
 import path from "path";
 import log from "electron-log/main";
 import { findExistingPath, resolveAppIconPaths } from "../utils";
 import { WindowRevealService } from "../services/window-reveal";
 import { startRendererServer } from "./renderer-server";
+import { windowBackgroundColor } from "./theme";
 
 async function waitForRenderer(url: string, attempts = 40): Promise<void> {
   for (let i = 0; i < attempts; i++) {
@@ -39,7 +40,7 @@ export function createMainWindow(): BrowserWindow {
     fullscreenable: false,
     show: false,
     title: "Gr8r Time Tracker",
-    backgroundColor: "#f9fafb",
+    backgroundColor: windowBackgroundColor(),
     autoHideMenuBar: true,
     // On macOS the window icon is flattened onto white and replaces dock.setIcon.
     ...(process.platform !== "darwin" && icon && !icon.isEmpty() ? { icon } : {}),
@@ -60,6 +61,13 @@ export function createMainWindow(): BrowserWindow {
   };
 
   win.once("ready-to-show", reveal);
+
+  // Theme setting changed, or the OS switched while on "System".
+  const onThemeUpdated = () => {
+    if (!win.isDestroyed()) win.setBackgroundColor(windowBackgroundColor());
+  };
+  nativeTheme.on("updated", onThemeUpdated);
+  win.on("closed", () => nativeTheme.removeListener("updated", onThemeUpdated));
 
   // Safety net — never leave a hidden window if ready-to-show never fires
   setTimeout(reveal, 4000);

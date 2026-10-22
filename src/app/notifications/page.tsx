@@ -47,17 +47,19 @@ function InboxItem({
     <li
       className={cn(
         "rounded-lg border border-[var(--border-subtle)] p-3",
-        notification.read ? "bg-white" : "bg-[var(--surface-elevated)]",
+        notification.read ? "bg-white dark:bg-card" : "bg-[var(--surface-elevated)]",
       )}
     >
       <button type="button" className="w-full text-left" onClick={() => onOpen(notification)}>
         <div className="flex items-start gap-3">
-          <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-[#ebebeb]">
+          <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-[#ebebeb] dark:bg-[#334155]">
             <FigmaGlyph src={iconForKind(notification.kind)} size={16} />
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-2">
-              <p className="text-xs font-medium text-[#1e2939]">{notification.title}</p>
+              <p className="text-xs font-medium text-[#1e2939] dark:text-[#f1f5f9]">
+                {notification.title}
+              </p>
               <span className="shrink-0 text-[10px] text-[var(--text-muted)]">
                 {dayjs(notification.createdAt).fromNow()}
               </span>
@@ -84,7 +86,7 @@ function InboxItem({
         )}
         <button
           type="button"
-          className="text-[11px] text-[var(--text-muted)] hover:text-[#1e2939]"
+          className="text-[11px] text-[var(--text-muted)] hover:text-[#1e2939] dark:hover:text-[#f1f5f9]"
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -163,9 +165,9 @@ export default function NotificationsPage() {
       </div>
 
       <div className="surface-card w-full overflow-hidden">
-        <div className="flex items-center justify-between border-b border-[#e5e5e5] px-4 py-3">
+        <div className="flex items-center justify-between border-b border-[#e5e5e5] px-4 py-3 dark:border-[#334155]">
           <div>
-            <p className="text-xs text-[#1e2939]">Push Notifications</p>
+            <p className="text-xs text-[#1e2939] dark:text-[#f1f5f9]">Push Notifications</p>
             <p className="text-xs text-[var(--text-muted)]">Timer reminders & alerts</p>
           </div>
           <Switch
@@ -181,9 +183,9 @@ export default function NotificationsPage() {
           />
         </div>
 
-        <div className="flex items-center justify-between border-b border-[#e5e5e5] px-4 py-3">
+        <div className="flex items-center justify-between border-b border-[#e5e5e5] px-4 py-3 dark:border-[#334155]">
           <div>
-            <p className="text-xs text-[#1e2939]">Idle Detection</p>
+            <p className="text-xs text-[#1e2939] dark:text-[#f1f5f9]">Idle Detection</p>
             <p className="text-xs text-[var(--text-muted)]">
               {settings.idleTimeoutMinutes > 0
                 ? `Auto-pause after ${formatIdleTimeoutLabel(settings.idleTimeoutMinutes)} idle`
@@ -207,7 +209,7 @@ export default function NotificationsPage() {
 
         <div className="px-4 py-3">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <p className="text-xs font-medium text-[#1e2939]">
+            <p className="text-xs font-medium text-[#1e2939] dark:text-[#f1f5f9]">
               Inbox
               {unreadCount > 0 ? (
                 <span className="ml-1.5 text-[var(--text-muted)]">({unreadCount} unread)</span>

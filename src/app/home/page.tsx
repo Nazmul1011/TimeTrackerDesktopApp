@@ -117,22 +117,22 @@ export default function HomePage() {
           onValueChange={(v) => setActiveTab(v as HomeTab)}
           className="w-full"
         >
-          <TabsList className="grid h-10 w-full grid-cols-3 rounded-lg bg-[#f5f5f5] p-1">
+          <TabsList className="grid h-10 w-full grid-cols-3 rounded-lg bg-[#f5f5f5] p-1 dark:bg-[#1e293b]">
             <TabsTrigger
               value="summary"
-              className="h-8 rounded-full text-sm font-normal shadow-none transition-colors hover:text-[#1e2939] data-[state=active]:rounded-md data-[state=active]:border data-[state=active]:border-[#ededed] data-[state=active]:bg-white data-[state=active]:text-black data-[state=inactive]:text-[#4a5565] data-[state=active]:shadow-none data-[state=inactive]:hover:bg-white/70"
+              className="h-8 rounded-full text-sm font-normal shadow-none transition-colors hover:text-[#1e2939] data-[state=active]:rounded-md data-[state=active]:border data-[state=active]:border-[#ededed] data-[state=active]:bg-white data-[state=active]:text-black data-[state=inactive]:text-[#4a5565] data-[state=active]:shadow-none data-[state=inactive]:hover:bg-white/70 dark:hover:text-[#f1f5f9] dark:data-[state=active]:border-[#475569] dark:data-[state=active]:bg-[#334155] dark:data-[state=active]:text-[#f1f5f9] dark:data-[state=inactive]:text-[#94a3b8] dark:data-[state=inactive]:hover:bg-[#334155]/60"
             >
               Summary
             </TabsTrigger>
             <TabsTrigger
               value="timesheet"
-              className="h-8 rounded-full text-sm font-normal shadow-none transition-colors hover:text-[#1e2939] data-[state=active]:rounded-md data-[state=active]:border data-[state=active]:border-[#ededed] data-[state=active]:bg-white data-[state=active]:text-black data-[state=inactive]:text-[#4a5565] data-[state=active]:shadow-none data-[state=inactive]:hover:bg-white/70"
+              className="h-8 rounded-full text-sm font-normal shadow-none transition-colors hover:text-[#1e2939] data-[state=active]:rounded-md data-[state=active]:border data-[state=active]:border-[#ededed] data-[state=active]:bg-white data-[state=active]:text-black data-[state=inactive]:text-[#4a5565] data-[state=active]:shadow-none data-[state=inactive]:hover:bg-white/70 dark:hover:text-[#f1f5f9] dark:data-[state=active]:border-[#475569] dark:data-[state=active]:bg-[#334155] dark:data-[state=active]:text-[#f1f5f9] dark:data-[state=inactive]:text-[#94a3b8] dark:data-[state=inactive]:hover:bg-[#334155]/60"
             >
               Timesheet
             </TabsTrigger>
             <TabsTrigger
               value="screenshots"
-              className="h-8 rounded-full text-sm font-normal shadow-none transition-colors hover:text-[#1e2939] data-[state=active]:rounded-md data-[state=active]:border data-[state=active]:border-[#ededed] data-[state=active]:bg-white data-[state=active]:text-black data-[state=inactive]:text-[#4a5565] data-[state=active]:shadow-none data-[state=inactive]:hover:bg-white/70"
+              className="h-8 rounded-full text-sm font-normal shadow-none transition-colors hover:text-[#1e2939] data-[state=active]:rounded-md data-[state=active]:border data-[state=active]:border-[#ededed] data-[state=active]:bg-white data-[state=active]:text-black data-[state=inactive]:text-[#4a5565] data-[state=active]:shadow-none data-[state=inactive]:hover:bg-white/70 dark:hover:text-[#f1f5f9] dark:data-[state=active]:border-[#475569] dark:data-[state=active]:bg-[#334155] dark:data-[state=active]:text-[#f1f5f9] dark:data-[state=inactive]:text-[#94a3b8] dark:data-[state=inactive]:hover:bg-[#334155]/60"
             >
               Screenshots
             </TabsTrigger>

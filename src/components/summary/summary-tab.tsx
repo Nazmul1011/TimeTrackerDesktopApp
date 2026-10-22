@@ -16,7 +16,7 @@ function AppIcon({ name, icon }: { name: string; icon: string | null }) {
   if (!icon || failed) {
     return (
       <span
-        className="flex size-4 items-center justify-center rounded-[3px] bg-[#e5e7eb] text-[9px] font-semibold leading-none text-[#4a5565]"
+        className="flex size-4 items-center justify-center rounded-[3px] bg-[#e5e7eb] text-[9px] font-semibold leading-none text-[#4a5565] dark:bg-[#334155] dark:text-[#94a3b8]"
         aria-hidden
       >
         {letter}
@@ -49,8 +49,8 @@ export function SummaryTab() {
   return (
     <div className="flex flex-col gap-4">
       {error ? (
-        <div className="rounded-lg border border-[#ededed] bg-white px-3 py-2 text-center">
-          <p className="text-xs text-[#99a1af]">{error}</p>
+        <div className="rounded-lg border border-[#ededed] bg-white px-3 py-2 text-center dark:border-[#334155] dark:bg-card">
+          <p className="text-xs text-[#99a1af] dark:text-[#64748b]">{error}</p>
           <button
             type="button"
             className="mt-1 text-xs font-medium text-[#2b7fff]"
@@ -89,8 +89,8 @@ export function SummaryTab() {
           Top Apps{topApps.length > 0 ? ` (${topApps.length})` : ""}
         </p>
         {appsError ? (
-          <div className="rounded-lg border border-[#ededed] bg-white px-3 py-2 text-center">
-            <p className="text-xs text-[#99a1af]">{appsError}</p>
+          <div className="rounded-lg border border-[#ededed] bg-white px-3 py-2 text-center dark:border-[#334155] dark:bg-card">
+            <p className="text-xs text-[#99a1af] dark:text-[#64748b]">{appsError}</p>
             <button
               type="button"
               className="mt-1 text-xs font-medium text-[#2b7fff]"

@@ -24,6 +24,9 @@ import { cancelWindowReveal } from "@/lib/window-reveal";
 import { useAuthStore } from "@/store/auth.store";
 import { useTimerStore } from "@/store/timer.store";
 
+/** Fallback only: realtime events push timer changes as they happen. */
+const TIMER_POLL_MS = 30_000;
+
 function getErrorMessage(err: unknown, fallback: string): string {
   if (typeof err === "object" && err !== null && "response" in err) {
     const response = (err as { response?: { data?: { message?: string } } }).response;
@@ -56,6 +59,9 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
   const reset = useTimerStore((s) => s.reset);
 
   const missingTimerStreakRef = useRef(0);
+  // False until today's total has loaded once; the poll below retries while false
+  // so a failed load (offline at boot/wake) can't leave the clock at 00:00:00.
+  const todayTotalLoadedRef = useRef(false);
   const [, forceRender] = useState(0);
 
   const refreshTodayTotal = useCallback(async () => {
@@ -66,8 +72,10 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
       // A total for the org we just left must not land on the new one.
       if (useAuthStore.getState().organizationId !== requestedOrg) return;
       setTodayLoggedSeconds(seconds);
+      todayTotalLoadedRef.current = true;
     } catch {
-      // keep previous total
+      // keep previous total; the poll retries
+      todayTotalLoadedRef.current = false;
     }
   }, [isAuthenticated, organizationId, orgTimezone, setTodayLoggedSeconds]);
 
@@ -90,6 +98,7 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
   useEffect(() => {
     if (loadedOrgRef.current === organizationId) return;
     loadedOrgRef.current = organizationId;
+    todayTotalLoadedRef.current = false;
     reset();
   }, [organizationId, reset]);
 
@@ -110,6 +119,7 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
     missingTimerStreakRef.current = 0;
     const requestedOrg = organizationId;
     const id = window.setInterval(async () => {
+      if (!todayTotalLoadedRef.current) void refreshTodayTotal();
       try {
         const current = await timerApi.current();
         if (useAuthStore.getState().organizationId !== requestedOrg) return;
@@ -137,9 +147,28 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
       } catch {
         // Network/401 must not stop a locally running timer (screenshots depend on it)
       }
-    }, 4000);
+    }, TIMER_POLL_MS);
     return () => window.clearInterval(id);
-  }, [hydrateFromApi, isAuthenticated, organizationId, setIdle]);
+  }, [hydrateFromApi, isAuthenticated, organizationId, refreshTodayTotal, setIdle]);
+
+  // Start / resume (button, tray, idle auto-resume, server hydrate)
+  useEffect(() => {
+    if (timer.status !== "running") return;
+    void refreshTodayTotal();
+  }, [timer.status, refreshTodayTotal]);
+
+  // Window shown again (from tray, after sleep)
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refreshTodayTotal();
+    };
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [refreshTodayTotal]);
 
   // Refresh today's total after any stop (local or remote)
   useEffect(() => {
