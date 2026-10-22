@@ -9,6 +9,7 @@ import { useOrgTimezone } from "@/hooks/useOrgTimezone";
 import { todayInZone } from "@/lib/org-date";
 import { ACTIVITY_FLUSHED_EVENT } from "@/hooks/useTrackingAgent";
 import { TIMER_STOPPED_EVENT } from "@/lib/timer-events";
+import { isPageHidden, onPageVisible } from "@/lib/visibility";
 import { activityApi } from "@/services/api/activity.api";
 import { getElectronAPI, isElectron } from "@/services/electron";
 import { useAuthStore } from "@/store/auth.store";
@@ -119,6 +120,7 @@ export function useTopApps() {
       void reload();
     };
     const onFlushed = () => {
+      if (isPageHidden()) return;
       void reload({ silent: true });
     };
     window.addEventListener(TIMER_STOPPED_EVENT, onStopped);
@@ -131,10 +133,17 @@ export function useTopApps() {
 
   useEffect(() => {
     if (!isAuthenticated || !organizationId) return;
+    // Activity uploads already trigger a reload while tracking; this only
+    // covers usage recorded elsewhere.
     const id = window.setInterval(() => {
-      void reload();
-    }, 15_000);
-    return () => window.clearInterval(id);
+      if (isPageHidden()) return;
+      void reload({ silent: true });
+    }, 60_000);
+    const unsubVisible = onPageVisible(() => void reload({ silent: true }));
+    return () => {
+      window.clearInterval(id);
+      unsubVisible();
+    };
   }, [isAuthenticated, organizationId, reload]);
 
   return { apps, isLoading, error, reload };

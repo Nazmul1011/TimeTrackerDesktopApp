@@ -3,10 +3,8 @@
  */
 import { ipcMain } from "electron";
 import log from "electron-log/main";
-import {
-  SettingsService,
-  type DesktopSettings,
-} from "../services/settings";
+import { SettingsService, type DesktopSettings } from "../services/settings";
+import { applyNativeTheme } from "../main/theme";
 
 export function registerSettingsIpc(): void {
   ipcMain.handle("settings:get", async () => {
@@ -15,16 +13,14 @@ export function registerSettingsIpc(): void {
     return settings;
   });
 
-  ipcMain.handle(
-    "settings:set",
-    async (_event, payload: Partial<DesktopSettings> | null) => {
-      const result = SettingsService.getInstance().set(payload ?? {});
-      if (!result.ok) {
-        log.warn("[ipc:settings] set failed", result.message);
-      } else {
-        log.info("[ipc:settings] set ok", result.settings);
-      }
-      return result;
-    },
-  );
+  ipcMain.handle("settings:set", async (_event, payload: Partial<DesktopSettings> | null) => {
+    const result = SettingsService.getInstance().set(payload ?? {});
+    if (!result.ok) {
+      log.warn("[ipc:settings] set failed", result.message);
+    } else {
+      log.info("[ipc:settings] set ok", result.settings);
+      applyNativeTheme(result.settings.theme);
+    }
+    return result;
+  });
 }

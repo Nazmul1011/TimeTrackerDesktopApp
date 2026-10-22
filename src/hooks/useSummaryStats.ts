@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useOrgTimezone } from "@/hooks/useOrgTimezone";
 import { monthEndYmd, monthStartYmd, todayInZone, weekEndYmd, weekStartYmd } from "@/lib/org-date";
 import { TIMER_STOPPED_EVENT } from "@/lib/timer-events";
+import { isPageHidden, onPageVisible } from "@/lib/visibility";
 import { reportsApi } from "@/services/api/reports.api";
 import { useAuthStore } from "@/store/auth.store";
 
@@ -144,9 +145,14 @@ export function useSummaryStats() {
   useEffect(() => {
     if (!isAuthenticated || !organizationId) return;
     const id = window.setInterval(() => {
+      if (isPageHidden()) return;
       void reload();
     }, 120_000);
-    return () => window.clearInterval(id);
+    const unsubVisible = onPageVisible(() => void reload());
+    return () => {
+      window.clearInterval(id);
+      unsubVisible();
+    };
   }, [isAuthenticated, organizationId, reload]);
 
   return { stats, isLoading, error, reload };

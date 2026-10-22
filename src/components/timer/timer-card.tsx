@@ -44,7 +44,7 @@ import {
 import { FigmaGlyph } from "@/components/icons/figma-glyph";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { RotateCcw } from "lucide-react";
+import { Pause, Play, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 
 function apiErrorMessage(err: unknown, fallback: string): string {
@@ -61,7 +61,7 @@ function apiErrorMessage(err: unknown, fallback: string): string {
 }
 
 const fieldClass =
-  "h-8 w-full rounded-lg border border-[#e6e6e6] bg-white px-3 text-xs leading-4 text-[#1e2939] outline-none placeholder:text-[#99a1af] focus:border-[#cfcfcf]";
+  "h-8 w-full rounded-lg border border-[#e6e6e6] dark:border-[#334155] bg-white dark:bg-card px-3 text-xs leading-4 text-[#1e2939] dark:text-[#f1f5f9] outline-none placeholder:text-[#99a1af] dark:placeholder:text-[#64748b] focus:border-[#cfcfcf] dark:focus:border-[#475569]";
 
 export function TimerCard() {
   const organizationId = useAuthStore((s) => s.organizationId);
@@ -364,7 +364,7 @@ export function TimerCard() {
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="flex min-w-0 items-center gap-1.5 text-xs text-[#1e2939] outline-none"
+              className="flex min-w-0 items-center gap-1.5 text-xs text-[#1e2939] outline-none dark:text-[#f1f5f9]"
               aria-label="Select project"
             >
               <FigmaGlyph src={triggerIcon} size={16} />
@@ -373,9 +373,9 @@ export function TimerCard() {
                 <FigmaGlyph src="/figma/icon-chevron.svg" size={12} />
               </span>
               {showProjectBadge && (
-                <span className="flex shrink-0 items-center rounded-md bg-[#f5f5f5] py-0 pl-px pr-1">
+                <span className="flex shrink-0 items-center rounded-md bg-[#f5f5f5] py-0 pl-px pr-1 dark:bg-[#1e293b]">
                   <FigmaGlyph src="/figma/icon-dot.svg" size={12} />
-                  <span className="text-xs tabular-nums leading-4 text-[#1e2939]">
+                  <span className="text-xs tabular-nums leading-4 text-[#1e2939] dark:text-[#f1f5f9]">
                     {formatProjectTriggerTime(projectSeconds)}
                   </span>
                 </span>
@@ -385,12 +385,12 @@ export function TimerCard() {
           <DropdownMenuContent
             align="start"
             sideOffset={6}
-            className="w-[250px] min-w-[250px] overflow-visible rounded-xl border border-[#e6e6e6] bg-white p-0 shadow-[0_1px_1px_rgba(0,0,0,0.03),0_4px_2px_rgba(0,0,0,0.03),0_9px_2.5px_rgba(0,0,0,0.02)]"
+            className="w-[250px] min-w-[250px] overflow-visible rounded-xl border border-[#e6e6e6] bg-white p-0 shadow-[0_1px_1px_rgba(0,0,0,0.03),0_4px_2px_rgba(0,0,0,0.03),0_9px_2.5px_rgba(0,0,0,0.02)] dark:border-[#334155] dark:bg-card"
             onCloseAutoFocus={(event) => event.preventDefault()}
           >
             <div
               className={cn(
-                "flex flex-col border-b border-[#ededed] px-2 pb-1 pt-2",
+                "flex flex-col border-b border-[#ededed] px-2 pb-1 pt-2 dark:border-[#334155]",
                 createMode && "max-h-[132px] overflow-y-auto",
               )}
             >
@@ -414,18 +414,18 @@ export function TimerCard() {
                     className={cn(
                       "min-h-8 cursor-pointer gap-2 rounded-md px-2 py-[5.5px] text-sm font-normal leading-5",
                       generalSelected
-                        ? "bg-[#f5f5f5] text-[#1e2939] focus:bg-[#f5f5f5] focus:text-[#1e2939]"
-                        : "text-[#4a5565] focus:bg-[#f5f5f5] focus:text-[#1e2939]",
+                        ? "bg-[#f5f5f5] text-[#1e2939] focus:bg-[#f5f5f5] focus:text-[#1e2939] dark:bg-[#1e293b] dark:text-[#f1f5f9] dark:focus:bg-[#1e293b] dark:focus:text-[#f1f5f9]"
+                        : "text-[#4a5565] focus:bg-[#f5f5f5] focus:text-[#1e2939] dark:text-[#94a3b8] dark:focus:bg-[#1e293b] dark:focus:text-[#f1f5f9]",
                     )}
                   >
                     <FigmaGlyph src={projectMenuIcon(0)} size={16} />
                     <span className="min-w-0 flex-1 truncate">{GENERAL_PROJECT.name}</span>
                     <span
                       className={cn(
-                        "flex shrink-0 items-center rounded-md text-xs tabular-nums leading-4 text-[#1e2939]",
+                        "flex shrink-0 items-center rounded-md text-xs tabular-nums leading-4 text-[#1e2939] dark:text-[#f1f5f9]",
                         generalSelected && generalShowDot
-                          ? "bg-white py-0 pl-px pr-1"
-                          : "bg-[#f5f5f5] px-1 py-0",
+                          ? "bg-white py-0 pl-px pr-1 dark:bg-[#334155]"
+                          : "bg-[#f5f5f5] px-1 py-0 dark:bg-[#1e293b]",
                       )}
                     >
                       {generalShowDot && <FigmaGlyph src="/figma/icon-dot.svg" size={12} />}
@@ -435,7 +435,9 @@ export function TimerCard() {
                 );
               })()}
               {projects.length === 0 && !createMode && (
-                <p className="px-2 py-2 text-sm text-[#99a1af]">No projects yet</p>
+                <p className="px-2 py-2 text-sm text-[#99a1af] dark:text-[#64748b]">
+                  No projects yet
+                </p>
               )}
               {projects.map((p, index) => {
                 const selected = p.id === selectedProjectId;
@@ -458,16 +460,18 @@ export function TimerCard() {
                     className={cn(
                       "min-h-8 cursor-pointer gap-2 rounded-md px-2 py-[5.5px] text-sm font-normal leading-5",
                       selected
-                        ? "bg-[#f5f5f5] text-[#1e2939] focus:bg-[#f5f5f5] focus:text-[#1e2939]"
-                        : "text-[#4a5565] focus:bg-[#f5f5f5] focus:text-[#1e2939]",
+                        ? "bg-[#f5f5f5] text-[#1e2939] focus:bg-[#f5f5f5] focus:text-[#1e2939] dark:bg-[#1e293b] dark:text-[#f1f5f9] dark:focus:bg-[#1e293b] dark:focus:text-[#f1f5f9]"
+                        : "text-[#4a5565] focus:bg-[#f5f5f5] focus:text-[#1e2939] dark:text-[#94a3b8] dark:focus:bg-[#1e293b] dark:focus:text-[#f1f5f9]",
                     )}
                   >
                     <FigmaGlyph src={projectMenuIcon(index + 1)} size={16} />
                     <span className="min-w-0 flex-1 truncate">{p.name}</span>
                     <span
                       className={cn(
-                        "flex shrink-0 items-center rounded-md text-xs tabular-nums leading-4 text-[#1e2939]",
-                        selected && showDot ? "bg-white py-0 pl-px pr-1" : "bg-[#f5f5f5] px-1 py-0",
+                        "flex shrink-0 items-center rounded-md text-xs tabular-nums leading-4 text-[#1e2939] dark:text-[#f1f5f9]",
+                        selected && showDot
+                          ? "bg-white py-0 pl-px pr-1 dark:bg-[#334155]"
+                          : "bg-[#f5f5f5] px-1 py-0 dark:bg-[#1e293b]",
                       )}
                     >
                       {showDot && <FigmaGlyph src="/figma/icon-dot.svg" size={12} />}
@@ -484,7 +488,9 @@ export function TimerCard() {
                 onPointerDown={(event) => event.stopPropagation()}
                 onKeyDown={(event) => event.stopPropagation()}
               >
-                <p className="text-xs leading-4 text-[#99a1af]">Create project</p>
+                <p className="text-xs leading-4 text-[#99a1af] dark:text-[#64748b]">
+                  Create project
+                </p>
 
                 <div className="flex w-full flex-col gap-[5px]">
                   <input
@@ -499,12 +505,14 @@ export function TimerCard() {
                   />
 
                   {/* Inline expand — keeps Cancel/Create below options (no overlay) */}
-                  <div className="w-full overflow-hidden rounded-lg border border-[#e6e6e6] bg-white">
+                  <div className="w-full overflow-hidden rounded-lg border border-[#e6e6e6] bg-white dark:border-[#334155] dark:bg-card">
                     <button
                       type="button"
                       className={cn(
                         "flex h-8 w-full items-center justify-between gap-2 px-3 text-left text-xs leading-4 outline-none",
-                        clientName ? "text-[#1e2939]" : "text-[#99a1af]",
+                        clientName
+                          ? "text-[#1e2939] dark:text-[#f1f5f9]"
+                          : "text-[#99a1af] dark:text-[#64748b]",
                       )}
                       onClick={() => setClientPickerOpen((open) => !open)}
                       aria-expanded={clientPickerOpen}
@@ -523,13 +531,15 @@ export function TimerCard() {
                     </button>
 
                     {clientPickerOpen && (
-                      <div className="border-t border-[#ededed]">
+                      <div className="border-t border-[#ededed] dark:border-[#334155]">
                         <div className="max-h-[104px] overflow-y-auto py-1">
                           <button
                             type="button"
                             className={cn(
-                              "flex w-full px-3 py-1.5 text-left text-xs hover:bg-[#f5f5f5]",
-                              !clientName ? "bg-[#f5f5f5] text-[#1e2939]" : "text-[#99a1af]",
+                              "flex w-full px-3 py-1.5 text-left text-xs hover:bg-[#f5f5f5] dark:hover:bg-[#1e293b]",
+                              !clientName
+                                ? "bg-[#f5f5f5] text-[#1e2939] dark:bg-[#1e293b] dark:text-[#f1f5f9]"
+                                : "text-[#99a1af] dark:text-[#64748b]",
                             )}
                             onClick={() => {
                               setClientName("");
@@ -543,8 +553,8 @@ export function TimerCard() {
                               key={name}
                               type="button"
                               className={cn(
-                                "flex w-full px-3 py-1.5 text-left text-xs text-[#1e2939] hover:bg-[#f5f5f5]",
-                                clientName === name && "bg-[#f5f5f5]",
+                                "flex w-full px-3 py-1.5 text-left text-xs text-[#1e2939] hover:bg-[#f5f5f5] dark:text-[#f1f5f9] dark:hover:bg-[#1e293b]",
+                                clientName === name && "bg-[#f5f5f5] dark:bg-[#1e293b]",
                               )}
                               onClick={() => {
                                 setClientName(name);
@@ -555,9 +565,9 @@ export function TimerCard() {
                             </button>
                           ))}
                         </div>
-                        <div className="border-t border-[#ededed] p-1.5">
+                        <div className="border-t border-[#ededed] p-1.5 dark:border-[#334155]">
                           <input
-                            className="h-7 w-full rounded-md border border-[#e6e6e6] bg-white px-2 text-xs text-[#1e2939] outline-none placeholder:text-[#99a1af] focus:border-[#cfcfcf]"
+                            className="h-7 w-full rounded-md border border-[#e6e6e6] bg-white px-2 text-xs text-[#1e2939] outline-none placeholder:text-[#99a1af] focus:border-[#cfcfcf] dark:border-[#334155] dark:bg-card dark:text-[#f1f5f9] dark:placeholder:text-[#64748b] dark:focus:border-[#475569]"
                             placeholder="Or type a client name"
                             value={clientName}
                             onChange={(event) => setClientName(event.target.value)}
@@ -577,7 +587,7 @@ export function TimerCard() {
                 <div className="flex items-center justify-end gap-2 pt-0.5">
                   <button
                     type="button"
-                    className="flex h-8 items-center justify-center rounded-lg border border-[#e6e6e6] bg-white px-3 text-xs font-medium leading-4 text-[#1e2939] hover:bg-[#fafafa]"
+                    className="flex h-8 items-center justify-center rounded-lg border border-[#e6e6e6] bg-white px-3 text-xs font-medium leading-4 text-[#1e2939] hover:bg-[#fafafa] dark:border-[#334155] dark:bg-card dark:text-[#f1f5f9] dark:hover:bg-[#1e293b]"
                     onClick={resetCreateForm}
                     disabled={creating}
                   >
@@ -596,7 +606,7 @@ export function TimerCard() {
             ) : (
               <div className="px-2 pb-2 pt-1">
                 <DropdownMenuItem
-                  className="min-h-8 cursor-pointer gap-2 rounded-md px-2 py-[5.5px] text-sm font-normal leading-5 text-[#1e2939] focus:bg-[#f5f5f5] focus:text-[#1e2939]"
+                  className="min-h-8 cursor-pointer gap-2 rounded-md px-2 py-[5.5px] text-sm font-normal leading-5 text-[#1e2939] focus:bg-[#f5f5f5] focus:text-[#1e2939] dark:text-[#f1f5f9] dark:focus:bg-[#1e293b] dark:focus:text-[#f1f5f9]"
                   onSelect={(event) => {
                     event.preventDefault();
                     setCreateMode(true);
@@ -618,10 +628,10 @@ export function TimerCard() {
           className="ml-auto flex shrink-0 items-center gap-1 rounded-md text-xs leading-4 outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35"
         >
           <span>
-            <span className="font-medium text-[#1e2939]">{dateLabel}</span>
-            <span className="text-[#4a5565]">,</span>
+            <span className="font-medium text-[#1e2939] dark:text-[#f1f5f9]">{dateLabel}</span>
+            <span className="text-[#4a5565] dark:text-[#94a3b8]">,</span>
           </span>
-          <span className="text-[#4a5565]">{dateShort}</span>
+          <span className="text-[#4a5565] dark:text-[#94a3b8]">{dateShort}</span>
         </button>
       </div>
 
@@ -633,7 +643,7 @@ export function TimerCard() {
               aria-label="Reset today's time"
               title="Reset today's time to 00:00:00"
               disabled={isSyncing || isResetting}
-              className="absolute -right-12 flex size-7 shrink-0 items-center justify-center rounded-full text-[#18181b] outline-none transition-colors hover:bg-[#f5f5f5] hover:text-black focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35 disabled:opacity-40 dark:text-white dark:hover:bg-[#334155]"
+              className="absolute -right-12 flex size-7 shrink-0 items-center justify-center rounded-full text-[#18181b] outline-none transition-colors hover:bg-[#f5f5f5] hover:text-black dark:hover:text-[#f1f5f9] focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35 disabled:opacity-40 dark:text-white dark:hover:bg-[#334155]"
               onClick={() => setResetConfirmOpen(true)}
             >
               <RotateCcw className="size-4" strokeWidth={2} />
@@ -643,7 +653,9 @@ export function TimerCard() {
             {display}
           </p>
         </div>
-        {isIdle && displayMs > 0 && <p className="text-[11px] text-[#99a1af]">Today</p>}
+        {isIdle && displayMs > 0 && (
+          <p className="text-[11px] text-[#99a1af] dark:text-[#64748b]">Today</p>
+        )}
 
         {isIdle && (
           <Button
@@ -651,8 +663,8 @@ export function TimerCard() {
             disabled={isSyncing}
             onClick={() => void start(selectedProjectId)}
           >
-            <FigmaGlyph src="/figma/icon-play.svg" size={16} />
             {isSyncing ? "Starting…" : "Start"}
+            <Play className="size-3.5 fill-current" aria-hidden />
           </Button>
         )}
 
@@ -664,15 +676,8 @@ export function TimerCard() {
               disabled={isSyncing}
               onClick={() => void pause()}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/figma/icon-pause.svg"
-                alt=""
-                className="size-3.5 dark:invert"
-                width={14}
-                height={14}
-              />
               Pause
+              <Pause className="size-3.5 fill-current" aria-hidden />
             </Button>
             <Button
               className="h-9 rounded-lg bg-[#f4323c] px-5 text-sm font-medium text-white hover:bg-[#e12d36]"
@@ -680,6 +685,7 @@ export function TimerCard() {
               onClick={() => void stop()}
             >
               Stop
+              <Square className="size-3 fill-current" aria-hidden />
             </Button>
           </div>
         )}
@@ -687,19 +693,12 @@ export function TimerCard() {
         {isPaused && (
           <div className="flex gap-2">
             <Button
-              className="h-9 gap-1 rounded-lg bg-[#2b7fff] px-5 text-sm font-medium text-white hover:bg-[#1a6aef]"
+              className="h-9 gap-1.5 rounded-lg bg-[#2b7fff] px-5 text-sm font-medium text-white hover:bg-[#1a6aef]"
               disabled={isSyncing}
               onClick={() => void resume()}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/figma/icon-play.svg"
-                alt=""
-                className="size-4 brightness-0 invert"
-                width={16}
-                height={16}
-              />
               Resume
+              <Play className="size-3.5 fill-current" aria-hidden />
             </Button>
             <Button
               className="h-9 rounded-lg bg-[#f4323c] px-5 text-sm font-medium text-white hover:bg-[#e12d36]"
@@ -707,6 +706,7 @@ export function TimerCard() {
               onClick={() => void stop()}
             >
               Stop
+              <Square className="size-3 fill-current" aria-hidden />
             </Button>
           </div>
         )}

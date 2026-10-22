@@ -36,6 +36,7 @@ export type TrackingOptions = {
  * must keep firing even when the window is hidden and the renderer throttled.
  */
 const HEARTBEAT_MS = 60_000;
+const REFRESH_TIMEOUT_MS = 8_000;
 const HEARTBEAT_TIMEOUT_MS = 15_000;
 
 export class TrackingService {
@@ -448,6 +449,7 @@ export class TrackingService {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ refreshToken: this.auth.refreshToken }),
+          signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
         });
         const json = (await response.json().catch(() => null)) as {
           success?: boolean;

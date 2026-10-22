@@ -26,8 +26,7 @@ import { toast } from "sonner";
 
 function getErrorMessage(err: unknown, fallback: string): string {
   if (typeof err === "object" && err !== null && "response" in err) {
-    const response = (err as { response?: { data?: { message?: string } } })
-      .response;
+    const response = (err as { response?: { data?: { message?: string } } }).response;
     if (response?.data?.message) return response.data.message;
   }
   if (err instanceof Error && err.message) return err.message;
@@ -40,9 +39,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [pendingOrgs, setPendingOrgs] = useState<
-    OrganizationWithMembership[] | null
-  >(null);
+  const [pendingOrgs, setPendingOrgs] = useState<OrganizationWithMembership[] | null>(null);
   const [selectedOrgId, setSelectedOrgId] = useState<string>("");
   const [pendingTokens, setPendingTokens] = useState<{
     access_token: string;
@@ -132,11 +129,8 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f9fafb] p-6">
-      <form
-        onSubmit={handleSubmit}
-        className="surface-card w-full max-w-sm space-y-4 p-6"
-      >
+    <div className="flex min-h-screen items-center justify-center bg-[#f9fafb] p-6 dark:bg-background">
+      <form onSubmit={handleSubmit} className="surface-card w-full max-w-sm space-y-4 p-6">
         <div className="flex flex-col items-center gap-2 text-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -146,16 +140,17 @@ export default function LoginPage() {
             width={40}
             height={40}
           />
-          <h1 className="text-lg font-semibold text-[#1e2939]">Sign in</h1>
-          <p className="text-xs text-[var(--text-muted)]">
-            Gr8r Time Tracker desktop
-          </p>
+          <h1 className="text-lg font-semibold text-[#1e2939] dark:text-[#f1f5f9]">Sign in</h1>
+          <p className="text-xs text-[var(--text-muted)]">Gr8r Time Tracker desktop</p>
         </div>
 
         {!pendingOrgs ? (
           <>
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-sm font-medium text-[#1e2939]">
+              <Label
+                htmlFor="email"
+                className="text-sm font-medium text-[#1e2939] dark:text-[#f1f5f9]"
+              >
                 Email
               </Label>
               <Input
@@ -166,11 +161,14 @@ export default function LoginPage() {
                 required
                 autoComplete="email"
                 placeholder="you@company.com"
-                className="text-[#1e2939]"
+                className="text-[#1e2939] dark:text-[#f1f5f9]"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-sm font-medium text-[#1e2939]">
+              <Label
+                htmlFor="password"
+                className="text-sm font-medium text-[#1e2939] dark:text-[#f1f5f9]"
+              >
                 Password
               </Label>
               <Input
@@ -181,19 +179,22 @@ export default function LoginPage() {
                 required
                 autoComplete="current-password"
                 placeholder="Enter your password"
-                className="text-[#1e2939]"
+                className="text-[#1e2939] dark:text-[#f1f5f9]"
               />
             </div>
           </>
         ) : (
           <div className="space-y-2">
-            <Label htmlFor="organization" className="text-sm font-medium text-[#1e2939]">
+            <Label
+              htmlFor="organization"
+              className="text-sm font-medium text-[#1e2939] dark:text-[#f1f5f9]"
+            >
               Organization
             </Label>
             <Select value={selectedOrgId} onValueChange={setSelectedOrgId}>
               <SelectTrigger
                 id="organization"
-                className="h-10 rounded-lg border-[#e6e6e6] bg-white text-[#1e2939]"
+                className="h-10 rounded-lg border-[#e6e6e6] bg-white text-[#1e2939] dark:border-[#334155] dark:bg-card dark:text-[#f1f5f9]"
               >
                 <SelectValue placeholder="Select organization" />
               </SelectTrigger>
@@ -213,11 +214,7 @@ export default function LoginPage() {
           className="w-full bg-[var(--brand)] hover:bg-[#1a6aef]"
           disabled={loading}
         >
-          {loading
-            ? "Signing in…"
-            : pendingOrgs
-              ? "Continue"
-              : "Sign in"}
+          {loading ? "Signing in…" : pendingOrgs ? "Continue" : "Sign in"}
         </Button>
       </form>
     </div>

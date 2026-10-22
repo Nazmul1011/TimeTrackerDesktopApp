@@ -146,7 +146,7 @@ export function TimesheetTab() {
 
   if (loading) {
     return (
-      <div className="overflow-hidden rounded-xl border border-[#ededed] bg-white p-4 text-center text-xs text-[#99a1af]">
+      <div className="overflow-hidden rounded-xl border border-[#ededed] bg-white p-4 text-center text-xs text-[#99a1af] dark:border-[#334155] dark:bg-card dark:text-[#64748b]">
         Loading today&apos;s entries…
       </div>
     );
@@ -154,7 +154,7 @@ export function TimesheetTab() {
 
   if (!rows.length) {
     return (
-      <div className="overflow-hidden rounded-xl border border-[#ededed] bg-white p-4 text-center text-xs text-[#99a1af]">
+      <div className="overflow-hidden rounded-xl border border-[#ededed] bg-white p-4 text-center text-xs text-[#99a1af] dark:border-[#334155] dark:bg-card dark:text-[#64748b]">
         {isRunning || isPaused
           ? "Timer is currently active. Completed time will appear here when paused or stopped."
           : "No time logged today. Start the timer to track time."}
@@ -163,7 +163,7 @@ export function TimesheetTab() {
   }
 
   return (
-    <div className="max-h-[min(280px,calc(100vh-340px))] overflow-y-auto overflow-x-hidden rounded-xl border border-[#ededed] bg-white">
+    <div className="max-h-[min(280px,calc(100vh-340px))] overflow-y-auto overflow-x-hidden rounded-xl border border-[#ededed] bg-white dark:border-[#334155] dark:bg-card">
       {rows.map(
         ({ entry, title, projectLabel, duration, isActive, playState, playEnabled }, index) => (
           <TimesheetRow

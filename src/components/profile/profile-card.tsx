@@ -31,11 +31,9 @@ export function ProfileCard({
         <AvatarFallback className="bg-[var(--brand)] text-lg text-white">{initials}</AvatarFallback>
       </Avatar>
       <div className="space-y-1">
-        <p className="text-lg font-semibold text-[#1e2939]">{name}</p>
+        <p className="text-lg font-semibold text-[#1e2939] dark:text-[#f1f5f9]">{name}</p>
         <p className="text-sm text-[var(--text-subtle)]">{email}</p>
-        {jobTitle ? (
-          <p className="text-xs text-[var(--text-muted)]">{jobTitle}</p>
-        ) : null}
+        {jobTitle ? <p className="text-xs text-[var(--text-muted)]">{jobTitle}</p> : null}
         {workspace && <p className="text-xs text-[var(--text-muted)]">{workspace}</p>}
       </div>
     </div>

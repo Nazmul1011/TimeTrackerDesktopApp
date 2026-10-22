@@ -10,6 +10,7 @@ import path from "path";
 import { applyDockIcon, applyDockIconSoon } from "../utils/dock-icon";
 
 import { createMainWindow } from "./window";
+import { applyNativeTheme } from "./theme";
 import { createTray } from "./tray";
 import { createAppMenu } from "./menu";
 import { initAutoUpdater } from "./updater";
@@ -80,6 +81,7 @@ async function bootstrap(): Promise<void> {
   initDatabase();
   registerIpcHandlers();
   SettingsService.getInstance().applyStoredLoginItem();
+  applyNativeTheme(SettingsService.getInstance().get().theme);
 
   applyDockIconSoon();
   mainWindow = createMainWindow();

@@ -7,6 +7,7 @@ import { STORAGE_KEYS } from "@/constants/storage";
 import type { ApiResponse, AuthTokens } from "./types";
 
 const baseURL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001";
+const REFRESH_TIMEOUT_MS = 8_000;
 
 export const apiClient = axios.create({
   baseURL,
@@ -29,9 +30,24 @@ function getDeviceId(): string {
   return deviceId;
 }
 
-apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+function isAuthRoute(url: string | undefined): boolean {
+  return Boolean(url && (url.includes("/auth/refresh") || url.includes("/auth/login")));
+}
+
+apiClient.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
   if (typeof window !== "undefined" && config.headers) {
-    const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+    let token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+    // After hours in the tray the token has expired. Refresh once up front
+    // instead of letting every request fail with 401 and retry.
+    if (
+      token &&
+      accessTokenExpiresSoon(token) &&
+      localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN) &&
+      !isAuthRoute(config.url)
+    ) {
+      const refreshed = await refreshOnce();
+      if (refreshed.status === "ok") token = refreshed.accessToken;
+    }
     const orgId = localStorage.getItem(STORAGE_KEYS.ORGANIZATION_ID);
     const sessionToken = localStorage.getItem(STORAGE_KEYS.SESSION_TOKEN);
 
@@ -75,7 +91,7 @@ async function refreshAccessToken(): Promise<RefreshResult> {
     const response = await axios.post<ApiResponse<Pick<AuthTokens, "access_token">>>(
       `${baseURL}/auth/refresh`,
       { refreshToken },
-      { headers: { "Content-Type": "application/json" } },
+      { headers: { "Content-Type": "application/json" }, timeout: REFRESH_TIMEOUT_MS },
     );
     const newAccessToken = response.data.data.access_token;
     localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, newAccessToken);
@@ -142,8 +158,7 @@ apiClient.interceptors.response.use(
       error.response?.status !== 401 ||
       !originalRequest ||
       originalRequest._retry ||
-      originalRequest.url?.includes("/auth/refresh") ||
-      originalRequest.url?.includes("/auth/login")
+      isAuthRoute(originalRequest.url)
     ) {
       return Promise.reject(error);
     }

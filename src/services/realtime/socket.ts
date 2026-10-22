@@ -141,9 +141,11 @@ export function connectRealtime(options?: {
   bind(socket, ["timer:stopped", "timer-stopped"], (payload) => {
     if (!isOwnEvent(payload)) return;
     const saved = savedSeconds(payload);
-    const previous = useTimerStore.getState().todayLoggedMs;
+    const { todayLoggedMs: previous, timer } = useTimerStore.getState();
+    // Already idle means the local stop handled this session and its total.
+    const alreadyCounted = timer.status === "idle";
     useTimerStore.getState().setIdle();
-    if (saved > 0) {
+    if (saved > 0 && !alreadyCounted) {
       useTimerStore.getState().setTodayLoggedSeconds(previous / 1000 + saved);
     }
     dispatchTimerStopped({

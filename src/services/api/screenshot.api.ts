@@ -57,8 +57,11 @@ export const screenshotApi = {
     };
   },
 
-  /** @param timeZone org IANA zone; defaults to the active org's. */
-  async listToday(limit = 100, timeZone?: string | null) {
+  /**
+   * One page of today's screenshots, newest first.
+   * @param timeZone org IANA zone; defaults to the active org's.
+   */
+  async listToday(page = 1, limit = 10, timeZone?: string | null) {
     // The org's calendar day, not the device's — see lib/org-date.
     const today = todayInZone(timeZone ?? getOrgTimezone());
     const { data } = await apiClient.get<
@@ -66,23 +69,28 @@ export const screenshotApi = {
         data?: ApiScreenshot[];
         screenshots?: ApiScreenshot[];
         items?: ApiScreenshot[];
-        meta?: { total: number };
+        meta?: { total?: number; totalPages?: number };
       }>
     >("/screenshots", {
       params: {
         startDate: today,
         endDate: today,
-        page: 1,
+        page,
         limit,
       },
     });
 
     const payload = data.data;
-    const items = payload?.data ?? payload?.screenshots ?? payload?.items ?? [];
-    return items.map((item) => ({
-      ...item,
-      imageUrl: resolveScreenshotUrl(item.imageUrl ?? item.url) ?? item.imageUrl ?? null,
-    }));
+    const rows = payload?.data ?? payload?.screenshots ?? payload?.items ?? [];
+    const total = payload?.meta?.total ?? rows.length;
+    return {
+      items: rows.map((item) => ({
+        ...item,
+        imageUrl: resolveScreenshotUrl(item.imageUrl ?? item.url) ?? item.imageUrl ?? null,
+      })),
+      total,
+      totalPages: payload?.meta?.totalPages ?? Math.max(1, Math.ceil(total / limit)),
+    };
   },
 
   async requestDeletion(id: string) {

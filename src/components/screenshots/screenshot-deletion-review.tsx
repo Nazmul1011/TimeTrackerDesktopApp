@@ -12,9 +12,7 @@ import { useAuthStore } from "@/store/auth.store";
 
 const ADMIN_ROLES = new Set(["ADMIN", "SUPER_ADMIN", "PROJECT_MANAGER"]);
 
-type PendingRequest = Awaited<
-  ReturnType<typeof screenshotApi.listPendingDeletionRequests>
->[number];
+type PendingRequest = Awaited<ReturnType<typeof screenshotApi.listPendingDeletionRequests>>[number];
 
 export function ScreenshotDeletionReview() {
   const organizationId = useAuthStore((s) => s.organizationId);
@@ -50,9 +48,7 @@ export function ScreenshotDeletionReview() {
     setBusyId(id);
     try {
       await screenshotApi.reviewDeletion(id, action);
-      toast.success(
-        action === "approve" ? "Screenshot deleted" : "Deletion request declined",
-      );
+      toast.success(action === "approve" ? "Screenshot deleted" : "Deletion request declined");
       await load();
     } catch {
       toast.error("Could not review deletion request");
@@ -65,8 +61,8 @@ export function ScreenshotDeletionReview() {
 
   return (
     <div className="surface-card w-full overflow-hidden">
-      <div className="border-b border-[#e5e5e5] px-4 py-3">
-        <p className="text-xs font-medium text-[#1e2939]">
+      <div className="border-b border-[#e5e5e5] px-4 py-3 dark:border-[#334155]">
+        <p className="text-xs font-medium text-[#1e2939] dark:text-[#f1f5f9]">
           Screenshot deletion requests
         </p>
         <p className="text-xs text-[var(--text-muted)]">
@@ -93,15 +89,11 @@ export function ScreenshotDeletionReview() {
                 <div className="size-12 shrink-0 overflow-hidden rounded-md bg-[var(--surface-elevated)]">
                   {req.imageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={req.imageUrl}
-                      alt=""
-                      className="size-full object-cover"
-                    />
+                    <img src={req.imageUrl} alt="" className="size-full object-cover" />
                   ) : null}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-medium text-[#1e2939]">
+                  <p className="truncate text-xs font-medium text-[#1e2939] dark:text-[#f1f5f9]">
                     {req.user?.name ?? req.user?.email ?? "Employee"}
                   </p>
                   <p className="text-[10px] text-[var(--text-muted)]">

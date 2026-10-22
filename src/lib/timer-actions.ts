@@ -9,7 +9,6 @@ import { dispatchTimerStopped } from "@/lib/timer-events";
 import { cancelWindowReveal, scheduleWindowRevealAfterResume } from "@/lib/window-reveal";
 import { getElectronAPI, isElectron } from "@/services/electron";
 import { timerApi } from "@/services/api/timer.api";
-import { timesheetApi } from "@/services/api/timesheet.api";
 import { useTimerStore } from "@/store/timer.store";
 import { getUserTimezone } from "@/lib/org-date";
 
@@ -88,29 +87,27 @@ export async function stopTimer(options?: {
     const store = useTimerStore.getState();
     try {
       const sessionSeconds = Math.max(0, Math.round(store.timer.elapsedMs / 1000));
+      // Read before the request: the realtime `timer:stopped` event can land
+      // first and already add this session to the total.
+      const previousLogged = store.todayLoggedMs;
       const result = await timerApi.stop({
         description: store.timer.description || undefined,
       });
       const rows = result?.entries ?? [];
       const fromEntries = rows.reduce((sum, entry) => sum + (entry.duration ?? 0), 0);
       const savedSeconds = result?.totalDurationSeconds || fromEntries || sessionSeconds;
-      const previousLogged = useTimerStore.getState().todayLoggedMs;
       useTimerStore.getState().setIdle();
       cancelWindowReveal();
       if (!options?.skipTodaySync) {
         if (savedSeconds > 0) {
           useTimerStore.getState().setTodayLoggedSeconds(previousLogged / 1000 + savedSeconds);
         }
+        // Listeners reload today's total from the server in the background;
+        // the buttons must not wait for it.
         dispatchTimerStopped({
           totalDurationSeconds: savedSeconds,
           entryCount: result?.count ?? rows.length,
         });
-        try {
-          const seconds = await timesheetApi.getTodayLoggedSeconds();
-          useTimerStore.getState().setTodayLoggedSeconds(seconds);
-        } catch {
-          // keep optimistic total
-        }
       } else {
         dispatchTimerStopped({
           totalDurationSeconds: savedSeconds,
