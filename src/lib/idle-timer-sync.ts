@@ -26,18 +26,17 @@ const outbox = createTimerOutbox<ApiTimer>({
   },
 });
 
-/** Idle began at `idleSince`; that stretch is not worked time. */
-export function handleIdlePause(idleSince?: string): void {
+/** Pauses as of now: the idle stretch before the pause counts as worked time. */
+export function handleIdlePause(): void {
   const store = useTimerStore.getState();
   if (store.timer.status !== "running") return;
 
-  const occurredAt = idleSince ?? new Date().toISOString();
-  const idleMs = Math.max(0, Date.now() - Date.parse(occurredAt));
+  const occurredAt = new Date().toISOString();
   // timer.elapsedMs only moves while the clock UI is ticking; work it out live.
   const liveMs = store.segmentStartedAt
     ? store.baseElapsedMs + (Date.now() - store.segmentStartedAt)
     : store.timer.elapsedMs;
-  store.applyElapsedSeconds(Math.max(0, liveMs - idleMs) / 1000, "paused");
+  store.applyElapsedSeconds(liveMs / 1000, "paused");
   cancelWindowReveal();
   outbox.submit({ kind: "pause", occurredAt });
 }

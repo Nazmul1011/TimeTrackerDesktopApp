@@ -90,12 +90,7 @@ export interface ElectronAPI {
     onAuthExpired: (callback: () => void) => () => void;
     onTokenRefreshed: (callback: (payload: { accessToken?: string }) => void) => () => void;
     onIdleTimeout: (
-      callback: (payload?: {
-        intervalMs?: number;
-        activityPercent?: number;
-        /** ISO time the idle stretch began (now minus the idle timeout). */
-        idleSince?: string;
-      }) => void,
+      callback: (payload?: { intervalMs?: number; activityPercent?: number }) => void,
     ) => () => void;
     onIdleResume: (callback: (payload?: { resumedAt?: string }) => void) => () => void;
     disarmIdleResume: () => Promise<{ ok: boolean }>;

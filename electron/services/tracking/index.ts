@@ -482,11 +482,7 @@ export class TrackingService {
     this.idlePauseInFlight = true;
     this.stopTimersOnly();
 
-    // The monitor fires after a full idle window of no input, so the idle
-    // stretch began that long ago. Capture it before the awaits below so the
-    // renderer can pause the timer as of then instead of as of "now".
     const idleMs = this.options.idleTimeoutMs ?? this.options.screenshotIntervalMs;
-    const idleSince = new Date(Date.now() - idleMs).toISOString();
 
     log.info(`[TrackingService] idle for one screenshot interval — pausing timer`);
 
@@ -512,7 +508,6 @@ export class TrackingService {
 
     this.emitToRenderer("tracking:idle-timeout", {
       intervalMs: idleMs,
-      idleSince,
       activityPercent: InputActivityMonitor.getInstance().peekPercent(),
     });
   }

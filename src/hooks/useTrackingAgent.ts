@@ -115,8 +115,8 @@ export function useTrackingAgent() {
     const api = getElectronAPI();
     if (!api?.tracking) return;
 
-    const unsubIdle = api.tracking.onIdleTimeout?.((payload) => {
-      handleIdlePause(payload?.idleSince);
+    const unsubIdle = api.tracking.onIdleTimeout?.(() => {
+      handleIdlePause();
     });
 
     const unsubResume = api.tracking.onIdleResume((payload) => {
