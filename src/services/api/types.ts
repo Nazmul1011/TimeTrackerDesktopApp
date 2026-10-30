@@ -53,6 +53,9 @@ export type ApiTimer = {
   id: string;
   startTime: string;
   pausedAt?: string | null;
+  totalPausedMs?: number;
+  /** Server clock when this snapshot was built. */
+  serverTime?: string;
   elapsedSeconds: number;
   status: ApiTimerStatus;
   projectId?: string | null;

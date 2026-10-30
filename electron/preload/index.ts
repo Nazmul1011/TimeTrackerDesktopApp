@@ -10,8 +10,7 @@ const electronAPI = {
     login: (payload: unknown) => ipcRenderer.invoke("auth:login", payload),
     logout: () => ipcRenderer.invoke("auth:logout"),
     getSession: () => ipcRenderer.invoke("auth:getSession"),
-    saveSession: (payload: unknown) =>
-      ipcRenderer.invoke("auth:saveSession", payload),
+    saveSession: (payload: unknown) => ipcRenderer.invoke("auth:saveSession", payload),
   },
   // Timer
   timer: {
@@ -30,8 +29,7 @@ const electronAPI = {
   tracking: {
     start: (payload: unknown) => ipcRenderer.invoke("tracking:start", payload),
     stop: () => ipcRenderer.invoke("tracking:stop"),
-    updateAuth: (payload: unknown) =>
-      ipcRenderer.invoke("tracking:updateAuth", payload),
+    updateAuth: (payload: unknown) => ipcRenderer.invoke("tracking:updateAuth", payload),
     captureNow: () => ipcRenderer.invoke("tracking:captureNow"),
     status: () => ipcRenderer.invoke("tracking:status"),
     onUploaded: (callback: (payload: unknown) => void) => {
@@ -50,23 +48,31 @@ const electronAPI = {
       return () => ipcRenderer.removeListener("tracking:auth-expired", listener);
     },
     onTokenRefreshed: (callback: (payload: { accessToken?: string }) => void) => {
-      const listener = (_event: unknown, payload: { accessToken?: string }) =>
-        callback(payload);
+      const listener = (_event: unknown, payload: { accessToken?: string }) => callback(payload);
       ipcRenderer.on("tracking:token-refreshed", listener);
-      return () =>
-        ipcRenderer.removeListener("tracking:token-refreshed", listener);
+      return () => ipcRenderer.removeListener("tracking:token-refreshed", listener);
     },
     onIdleTimeout: (callback: (payload: unknown) => void) => {
       const listener = (_event: unknown, payload: unknown) => callback(payload);
       ipcRenderer.on("tracking:idle-timeout", listener);
       return () => ipcRenderer.removeListener("tracking:idle-timeout", listener);
     },
+    onIdleResume: (callback: (payload: unknown) => void) => {
+      const listener = (_event: unknown, payload: unknown) => callback(payload);
+      ipcRenderer.on("tracking:idle-resume", listener);
+      return () => ipcRenderer.removeListener("tracking:idle-resume", listener);
+    },
+    disarmIdleResume: () => ipcRenderer.invoke("tracking:disarmIdleResume"),
+    openScreenRecording: () => ipcRenderer.invoke("tracking:openScreenRecording"),
+    retryScreenshots: () => ipcRenderer.invoke("tracking:retryScreenshots"),
   },
   // Activity
   activity: {
     getIdleState: (thresholdSeconds?: number) =>
       ipcRenderer.invoke("activity:getIdleState", thresholdSeconds),
     getActiveWindow: () => ipcRenderer.invoke("activity:getActiveWindow"),
+    getAppIcon: (appName: string) => ipcRenderer.invoke("activity:getAppIcon", appName),
+    getAppIcons: (appNames: string[]) => ipcRenderer.invoke("activity:getAppIcons", appNames),
     getSummary: () => ipcRenderer.invoke("activity:getSummary"),
     start: () => ipcRenderer.invoke("activity:start"),
     stop: () => ipcRenderer.invoke("activity:stop"),
@@ -87,24 +93,48 @@ const electronAPI = {
       ipcRenderer.invoke("window:scheduleRevealAfterResume", payload ?? {}),
     cancelReveal: () => ipcRenderer.invoke("window:cancelReveal"),
     revealNow: () => ipcRenderer.invoke("window:revealNow"),
+    setTimerStatus: (status: "idle" | "running" | "paused") =>
+      ipcRenderer.invoke("window:setTimerStatus", status),
   },
   // Sync
   sync: {
     run: () => ipcRenderer.invoke("sync:run"),
     getStatus: () => ipcRenderer.invoke("sync:getStatus"),
-    enqueueTimerEvent: (payload: unknown) =>
-      ipcRenderer.invoke("sync:enqueueTimerEvent", payload),
-    saveLocalTimer: (payload: unknown) =>
-      ipcRenderer.invoke("sync:saveLocalTimer", payload),
+    enqueueTimerEvent: (payload: unknown) => ipcRenderer.invoke("sync:enqueueTimerEvent", payload),
+    saveLocalTimer: (payload: unknown) => ipcRenderer.invoke("sync:saveLocalTimer", payload),
     getLocalTimer: () => ipcRenderer.invoke("sync:getLocalTimer"),
-    enqueueActivities: (payload: unknown) =>
-      ipcRenderer.invoke("sync:enqueueActivities", payload),
+    enqueueActivities: (payload: unknown) => ipcRenderer.invoke("sync:enqueueActivities", payload),
     pendingCounts: () => ipcRenderer.invoke("sync:pendingCounts"),
     onStatus: (callback: (payload: unknown) => void) => {
       const listener = (_event: unknown, payload: unknown) => callback(payload);
       ipcRenderer.on("sync:status", listener);
       return () => ipcRenderer.removeListener("sync:status", listener);
     },
+    onOrgAccessDenied: (callback: (payload: { organizationId?: string }) => void) => {
+      const listener = (_event: unknown, payload: { organizationId?: string }) => callback(payload);
+      ipcRenderer.on("sync:org-access-denied", listener);
+      return () => ipcRenderer.removeListener("sync:org-access-denied", listener);
+    },
+  },
+  tray: {
+    setState: (payload: unknown) => ipcRenderer.invoke("tray:setState", payload),
+    onCommand: (callback: (payload: { action?: string }) => void) => {
+      const listener = (_event: unknown, payload: { action?: string }) => callback(payload);
+      ipcRenderer.on("tray:command", listener);
+      return () => ipcRenderer.removeListener("tray:command", listener);
+    },
+  },
+  app: {
+    exit: () => ipcRenderer.invoke("app:exit"),
+  },
+  updater: {
+    onDownloaded: (callback: (payload: { version: string }) => void) => {
+      const listener = (_event: unknown, payload: { version: string }) => callback(payload);
+      ipcRenderer.on("updater:downloaded", listener);
+      return () => ipcRenderer.removeListener("updater:downloaded", listener);
+    },
+    install: () => ipcRenderer.invoke("updater:install"),
+    check: () => ipcRenderer.invoke("updater:check"),
   },
   // Platform helpers
   platform: process.platform,

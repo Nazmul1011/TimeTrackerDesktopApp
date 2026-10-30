@@ -1,123 +1,150 @@
 /**
- * Top Apps — live usage from /activity/apps (this week, exclude idle).
+ * Top Apps — live usage from /activity/apps for today only (resets at midnight).
+ * Icons: OS icons via Electron gr8r-icon:// protocol; letter avatar fallback.
  */
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { iconForAppName } from "@/lib/app-name";
+import { useOrgTimezone } from "@/hooks/useOrgTimezone";
+import { todayInZone } from "@/lib/org-date";
+import { ACTIVITY_FLUSHED_EVENT } from "@/hooks/useTrackingAgent";
 import { TIMER_STOPPED_EVENT } from "@/lib/timer-events";
+import { isPageHidden, onPageVisible } from "@/lib/visibility";
 import { activityApi } from "@/services/api/activity.api";
-import { toIsoDate } from "@/services/api/timesheet.api";
+import { getElectronAPI, isElectron } from "@/services/electron";
 import { isNetworkError } from "@/lib/network";
 import { useAuthStore } from "@/store/auth.store";
+import { useTimerStore } from "@/store/timer.store";
 
 export type TopAppChip = {
   id: string;
   name: string;
   percent: number;
+  /** Real OS icon URL (gr8r-icon://...) when available */
   icon: string | null;
   totalDuration: number;
 };
 
-function startOfWeekMonday(date = new Date()): Date {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  return d;
-}
-
-function letterIconDataUrl(name: string): string {
-  const letter = (name.trim().charAt(0) || "?").toUpperCase();
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" rx="4" fill="#e5e7eb"/><text x="8" y="12" text-anchor="middle" font-size="9" font-family="system-ui,sans-serif" fill="#4a5565">${letter}</text></svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+async function resolveIcons(appNames: string[]): Promise<Record<string, string | null>> {
+  if (!isElectron()) return {};
+  const api = getElectronAPI();
+  if (!api?.activity?.getAppIcons) return {};
+  try {
+    return (await api.activity.getAppIcons(appNames)) ?? {};
+  } catch {
+    return {};
+  }
 }
 
 export function useTopApps() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const organizationId = useAuthStore((s) => s.organizationId);
+  // Arrives with the org list, after the first render on a cold start.
+  const orgTimezone = useOrgTimezone();
+  const todayDate = useTimerStore((s) => s.todayDate);
   const [apps, setApps] = useState<TopAppChip[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    if (!isAuthenticated || !organizationId) {
-      setApps([]);
-      setIsLoading(false);
-      return;
-    }
+  const reload = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!isAuthenticated || !organizationId) {
+        setApps([]);
+        setIsLoading(false);
+        return;
+      }
 
-    setIsLoading(true);
-    setError(null);
+      // A reply for the org we just left must never overwrite the current one.
+      const requestedOrg = organizationId;
+      const isStale = () => useAuthStore.getState().organizationId !== requestedOrg;
 
-    const now = new Date();
-    const weekStart = toIsoDate(startOfWeekMonday(now));
-    const today = toIsoDate(now);
+      if (!opts?.silent) setIsLoading(true);
+      setError(null);
 
-    try {
-      let rows = await activityApi.getApps({
-        startDate: weekStart,
-        endDate: today,
-        excludeIdle: true,
-      });
+      // Today only — same calendar day as the main timer (org timezone).
+      const today = todayInZone(orgTimezone);
 
-      // If this week is empty, try today only (edge case of clock/tz), else keep empty
-      if (rows.length === 0) {
-        rows = await activityApi.getApps({
+      try {
+        const rows = await activityApi.getApps({
           startDate: today,
           endDate: today,
           excludeIdle: true,
         });
+
+        if (isStale()) return;
+
+        const osIcons = await resolveIcons(rows.map((r) => r.appName));
+
+        const top = rows.map((row) => ({
+          id: row.appName,
+          name: row.appName,
+          percent: row.percent ?? 0,
+          icon: osIcons[row.appName] || null,
+          totalDuration: row.totalDuration,
+        }));
+
+        if (isStale()) return;
+        setApps(top);
+      } catch (err) {
+        if (isStale() || isNetworkError(err)) return;
+        const message =
+          typeof err === "object" &&
+          err !== null &&
+          "response" in err &&
+          (err as { response?: { data?: { message?: string } } }).response?.data?.message
+            ? (err as { response: { data: { message: string } } }).response.data.message
+            : err instanceof Error
+              ? err.message
+              : "Failed to load top apps";
+        setError(message);
+      } finally {
+        if (!isStale()) setIsLoading(false);
       }
+    },
+    [isAuthenticated, organizationId, orgTimezone],
+  );
 
-      const top = rows.slice(0, 6).map((row) => ({
-        id: row.appName,
-        name: row.appName,
-        percent: row.percent ?? 0,
-        icon: iconForAppName(row.appName) ?? letterIconDataUrl(row.appName),
-        totalDuration: row.totalDuration,
-      }));
+  // Drop the previous org's chips immediately rather than showing them
+  // until the new org's request lands.
+  useEffect(() => {
+    setApps([]);
+    setError(null);
+  }, [organizationId]);
 
-      setApps(top);
-    } catch (err) {
-      if (isNetworkError(err)) return;
-      const message =
-        typeof err === "object" &&
-        err !== null &&
-        "response" in err &&
-        (err as { response?: { data?: { message?: string } } }).response?.data
-          ?.message
-          ? (err as { response: { data: { message: string } } }).response.data
-              .message
-          : err instanceof Error
-            ? err.message
-            : "Failed to load top apps";
-      setError(message);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isAuthenticated, organizationId]);
-
+  // Midnight (and org-day rollover) must drop yesterday's chips like the clock.
   useEffect(() => {
     void reload();
-  }, [reload]);
+  }, [reload, todayDate]);
 
   useEffect(() => {
     const onStopped = () => {
       void reload();
     };
+    const onFlushed = () => {
+      if (isPageHidden()) return;
+      void reload({ silent: true });
+    };
     window.addEventListener(TIMER_STOPPED_EVENT, onStopped);
-    return () => window.removeEventListener(TIMER_STOPPED_EVENT, onStopped);
+    window.addEventListener(ACTIVITY_FLUSHED_EVENT, onFlushed);
+    return () => {
+      window.removeEventListener(TIMER_STOPPED_EVENT, onStopped);
+      window.removeEventListener(ACTIVITY_FLUSHED_EVENT, onFlushed);
+    };
   }, [reload]);
 
-  // Refresh while timer is running so chips update as samples flush
   useEffect(() => {
     if (!isAuthenticated || !organizationId) return;
+    // Activity uploads already trigger a reload while tracking; this only
+    // covers usage recorded elsewhere.
     const id = window.setInterval(() => {
-      void reload();
-    }, 45_000);
-    return () => window.clearInterval(id);
+      if (isPageHidden()) return;
+      void reload({ silent: true });
+    }, 60_000);
+    const unsubVisible = onPageVisible(() => void reload({ silent: true }));
+    return () => {
+      window.clearInterval(id);
+      unsubVisible();
+    };
   }, [isAuthenticated, organizationId, reload]);
 
   return { apps, isLoading, error, reload };

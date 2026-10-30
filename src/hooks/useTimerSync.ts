@@ -4,7 +4,9 @@
 "use client";
 
 import { useCallback, useEffect } from "react";
+import { dispatchTimerStopped } from "@/lib/timer-events";
 import { timerApi } from "@/services/api/timer.api";
+import type { ApiTimer } from "@/services/api/types";
 import { useAuthStore } from "@/store/auth.store";
 import { useTimerStore } from "@/store/timer.store";
 
@@ -16,13 +18,19 @@ export function useTimerSync(options?: { onFocus?: boolean; intervalMs?: number 
   const sync = useCallback(async () => {
     if (!isAuthenticated || !organizationId) return;
     if (useTimerStore.getState().isOfflineSession) return;
+    const apply = (apiTimer: ApiTimer | null) => {
+      const wasActive = useTimerStore.getState().timer.status !== "idle";
+      if (useTimerStore.getState().isOfflineSession) return;
+      hydrateFromApi(apiTimer);
+      // Session ended on the server while we were away (sleep/offline): it is
+      // now a saved entry, so reload today's total.
+      if (!apiTimer && wasActive) dispatchTimerStopped();
+    };
     try {
-      const synced = await timerApi.sync();
-      hydrateFromApi(synced);
+      apply(await timerApi.sync());
     } catch {
       try {
-        const current = await timerApi.current();
-        hydrateFromApi(current);
+        apply(await timerApi.current());
       } catch {
         // keep local state
       }
@@ -39,12 +47,14 @@ export function useTimerSync(options?: { onFocus?: boolean; intervalMs?: number 
     const onFocus = () => {
       void sync();
     };
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", () => {
+    const onVisibility = () => {
       if (document.visibilityState === "visible") void sync();
-    });
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [isAuthenticated, options?.onFocus, sync]);
 

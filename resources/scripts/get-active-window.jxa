@@ -1,0 +1,49 @@
+#!/usr/bin/osascript -l JavaScript
+/**
+ * Frontmost macOS app + window title.
+ * 1) App name from NSWorkspace (no special permission).
+ * 2) Window title from System Events (needs Accessibility when available).
+ */
+ObjC.import("AppKit");
+
+function run() {
+  var sep = String.fromCharCode(0x1e);
+  var name = "Desktop";
+  var title = "";
+
+  try {
+    var front = $.NSWorkspace.sharedWorkspace.frontmostApplication;
+    if (front) {
+      var localized = ObjC.unwrap(front.localizedName);
+      var bundle = ObjC.unwrap(front.bundleIdentifier);
+      if (localized && String(localized).length) name = String(localized);
+      else if (bundle && String(bundle).length) name = String(bundle);
+    }
+  } catch (e1) {}
+
+  try {
+    var se = Application("System Events");
+    se.includeStandardAdditions = true;
+    var list = se.applicationProcesses.whose({ frontmost: true })();
+    if (list && list.length > 0) {
+      var proc = list[0];
+      try {
+        var wins = proc.windows();
+        if (wins && wins.length > 0) {
+          var n = wins[0].name();
+          if (n) title = String(n);
+        }
+      } catch (e2) {}
+      if (name === "Desktop") {
+        try {
+          var pn = proc.name();
+          if (pn) name = String(pn);
+        } catch (e3) {}
+      }
+    }
+  } catch (e4) {}
+
+  name = String(name || "Desktop").replace(new RegExp(sep, "g"), " ");
+  title = String(title || "").replace(new RegExp(sep, "g"), " ");
+  return name + sep + title;
+}

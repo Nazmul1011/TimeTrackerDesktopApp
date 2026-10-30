@@ -3,11 +3,8 @@
  */
 import { ipcMain } from "electron";
 import log from "electron-log/main";
-import {
-  TrackingService,
-  type TrackingAuth,
-  type TrackingOptions,
-} from "../services/tracking";
+import { TrackingService, type TrackingAuth, type TrackingOptions } from "../services/tracking";
+import { MacPermissions } from "../services/mac-permissions";
 import { SyncService } from "../services/sync";
 
 export function registerTrackingIpc(): void {
@@ -15,10 +12,7 @@ export function registerTrackingIpc(): void {
 
   ipcMain.handle(
     "tracking:start",
-    async (
-      _event,
-      payload: TrackingAuth & Partial<TrackingOptions>,
-    ) => {
+    async (_event, payload: TrackingAuth & Partial<TrackingOptions>) => {
       const {
         accessToken,
         refreshToken,
@@ -63,14 +57,13 @@ export function registerTrackingIpc(): void {
     return result;
   });
 
-  ipcMain.handle(
-    "tracking:updateAuth",
-    async (_event, payload: Partial<TrackingAuth>) => {
-      tracking.updateAuth(payload);
-      SyncService.getInstance().schedule(400);
-      return { ok: true };
-    },
-  );
+  ipcMain.handle("tracking:updateAuth", async (_event, payload: Partial<TrackingAuth>) => {
+    tracking.updateAuth(payload);
+    const sync = SyncService.getInstance();
+    sync.clearOrgBlock();
+    sync.schedule(400);
+    return { ok: true };
+  });
 
   ipcMain.handle("tracking:captureNow", async () => {
     return tracking.captureAndUpload();
@@ -78,5 +71,19 @@ export function registerTrackingIpc(): void {
 
   ipcMain.handle("tracking:status", async () => {
     return { running: tracking.isRunning() };
+  });
+
+  ipcMain.handle("tracking:disarmIdleResume", async () => {
+    tracking.disarmIdleResume();
+    return { ok: true };
+  });
+
+  ipcMain.handle("tracking:openScreenRecording", async () => {
+    await MacPermissions.openScreenRecordingSettings();
+    return { ok: true };
+  });
+
+  ipcMain.handle("tracking:retryScreenshots", async () => {
+    return tracking.retryScreenshots();
   });
 }

@@ -27,10 +27,10 @@ import { projectsApi, type ApiProject } from "@/services/api/projects.api";
 import type { ApiTimeEntry } from "@/services/api/timesheet.api";
 
 const fieldClass =
-  "h-8 w-full rounded-lg border border-[#e6e6e6] bg-white px-3 text-xs leading-4 text-[#1e2939] outline-none placeholder:text-[#99a1af] focus:border-[#cfcfcf]";
+  "h-8 w-full rounded-lg border border-[#e6e6e6] dark:border-[#334155] bg-white dark:bg-card px-3 text-xs leading-4 text-[#1e2939] dark:text-[#f1f5f9] outline-none placeholder:text-[#99a1af] dark:placeholder:text-[#64748b] focus:border-[#cfcfcf] dark:focus:border-[#475569]";
 
 const menuPanelClass =
-  "w-[250px] min-w-[250px] max-h-[min(320px,calc(100vh-100px))] overflow-y-auto rounded-xl border border-[#e6e6e6] bg-white p-0 shadow-[0_1px_1px_rgba(0,0,0,0.03),0_4px_2px_rgba(0,0,0,0.03),0_9px_2.5px_rgba(0,0,0,0.02)]";
+  "w-[250px] min-w-[250px] max-h-[min(320px,calc(100vh-100px))] overflow-y-auto rounded-xl border border-[#e6e6e6] dark:border-[#334155] bg-white dark:bg-card p-0 shadow-[0_1px_1px_rgba(0,0,0,0.03),0_4px_2px_rgba(0,0,0,0.03),0_9px_2.5px_rgba(0,0,0,0.02)]";
 
 interface TimesheetRowProps {
   entry: ApiTimeEntry;
@@ -38,14 +38,14 @@ interface TimesheetRowProps {
   projectLabel: string;
   duration: string;
   isActive?: boolean;
+  /** running = pause icon. paused/idle = play icon. */
+  playState?: "running" | "paused";
+  playEnabled?: boolean;
   unlinked?: boolean;
   showMenu?: boolean;
   compact?: boolean;
   onPlay?: () => void;
-  onSave: (payload: {
-    description: string;
-    projectId: string | null;
-  }) => Promise<void>;
+  onSave: (payload: { description: string; projectId: string | null }) => Promise<void>;
   onDelete: () => Promise<void>;
 }
 
@@ -55,6 +55,8 @@ export function TimesheetRow({
   projectLabel,
   duration,
   isActive,
+  playState = "paused",
+  playEnabled = false,
   unlinked,
   showMenu = true,
   compact,
@@ -91,7 +93,10 @@ export function TimesheetRow({
 
   useEffect(() => {
     if (!menuOpen || !editMode) return;
-    void projectsApi.listMine().then(setProjects).catch(() => setProjects([]));
+    void projectsApi
+      .listMine()
+      .then(setProjects)
+      .catch(() => setProjects([]));
   }, [editMode, menuOpen]);
 
   const handleSave = async () => {
@@ -131,19 +136,19 @@ export function TimesheetRow({
     <>
       <div
         className={cn(
-          "flex w-full items-center gap-2 border-b border-[#ededed] pl-3 pr-2 last:border-b-0",
+          "flex w-full items-center gap-2 border-b border-[#ededed] pl-3 pr-2 last:border-b-0 dark:border-[#334155]",
           compact ? "py-2" : "py-3",
         )}
       >
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <div className="flex min-w-0 flex-1 items-center gap-1">
-            <p className="truncate text-sm leading-5 text-[#1e2939]">{title}</p>
+            <p className="truncate text-sm leading-5 text-[#1e2939] dark:text-[#f1f5f9]">{title}</p>
             {isActive && <FigmaGlyph src="/figma/icon-dot.svg" size={12} />}
           </div>
 
           <div
             className={cn(
-              "flex max-w-[120px] min-w-0 shrink-0 items-center gap-1 rounded-lg border border-[#e6e6e6] bg-white px-2 py-1",
+              "flex min-w-0 max-w-[120px] shrink-0 items-center gap-1 rounded-lg border border-[#e6e6e6] bg-white px-2 py-1 dark:border-[#334155] dark:bg-card",
               unlinked && "flex-1",
             )}
           >
@@ -151,33 +156,46 @@ export function TimesheetRow({
               src={unlinked ? "/figma/icon-warning.svg" : "/figma/icon-project.svg"}
               size={16}
             />
-            <span className="truncate text-xs leading-4 text-[#4a5565]">
+            <span className="truncate text-xs leading-4 text-[#4a5565] dark:text-[#94a3b8]">
               {unlinked ? "Unlinked" : projectLabel}
             </span>
           </div>
         </div>
 
-        <span className="w-[50px] shrink-0 px-2 py-1 text-right text-xs tabular-nums leading-4 text-[#1e2939]">
+        <span className="w-[64px] shrink-0 px-1 py-1 text-right text-xs tabular-nums leading-4 text-[#1e2939] dark:text-[#f1f5f9]">
           {duration}
         </span>
 
         <button
           type="button"
-          className="flex size-6 shrink-0 items-center justify-center rounded-full border border-[#ededed] bg-white p-1.5 outline-none transition-colors hover:bg-[#f5f5f5]"
-          onClick={onPlay}
-          aria-label={`Play ${title}`}
+          disabled={!playEnabled}
+          className={cn(
+            "flex size-6 shrink-0 items-center justify-center rounded-full border border-[#ededed] bg-white p-1.5 outline-none dark:border-[#334155] dark:bg-card",
+            playEnabled
+              ? "transition-colors hover:bg-[#f5f5f5] dark:hover:bg-[#1e293b]"
+              : "cursor-not-allowed opacity-40",
+          )}
+          onClick={playEnabled ? onPlay : undefined}
+          aria-label={
+            !playEnabled
+              ? "Only the latest entry can be controlled"
+              : playState === "running"
+                ? `Pause ${title}`
+                : `Play ${title}`
+          }
         >
-          <FigmaGlyph src="/figma/icon-play-blue.svg" size={12} />
+          <FigmaGlyph
+            src={
+              playState === "running" ? "/figma/icon-pause-blue.svg" : "/figma/icon-play-blue.svg"
+            }
+            size={12}
+          />
         </button>
 
         {showMenu ? (
           <DropdownMenu open={menuOpen} onOpenChange={handleMenuOpenChange} modal={false}>
             <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="size-4 shrink-0 outline-none"
-                aria-label="Row menu"
-              >
+              <button type="button" className="size-4 shrink-0 outline-none" aria-label="Row menu">
                 <FigmaGlyph src="/figma/icon-more.svg" size={16} />
               </button>
             </DropdownMenuTrigger>
@@ -193,7 +211,7 @@ export function TimesheetRow({
                   onPointerDown={(event) => event.stopPropagation()}
                   onKeyDown={(event) => event.stopPropagation()}
                 >
-                  <p className="text-xs leading-4 text-[#99a1af]">Edit entry</p>
+                  <p className="text-xs leading-4 text-[#99a1af] dark:text-[#64748b]">Edit entry</p>
 
                   <div className="flex w-full flex-col gap-[5px]">
                     <input
@@ -207,12 +225,14 @@ export function TimesheetRow({
                       }}
                     />
 
-                    <div className="w-full overflow-hidden rounded-lg border border-[#e6e6e6] bg-white">
+                    <div className="w-full overflow-hidden rounded-lg border border-[#e6e6e6] bg-white dark:border-[#334155] dark:bg-card">
                       <button
                         type="button"
                         className={cn(
                           "flex h-8 w-full items-center justify-between gap-2 px-3 text-left text-xs leading-4 outline-none",
-                          selectedProjectName ? "text-[#1e2939]" : "text-[#99a1af]",
+                          selectedProjectName
+                            ? "text-[#1e2939] dark:text-[#f1f5f9]"
+                            : "text-[#99a1af] dark:text-[#64748b]",
                         )}
                         onClick={() => setProjectPickerOpen((open) => !open)}
                         aria-expanded={projectPickerOpen}
@@ -231,15 +251,15 @@ export function TimesheetRow({
                       </button>
 
                       {projectPickerOpen && (
-                        <div className="border-t border-[#ededed]">
+                        <div className="border-t border-[#ededed] dark:border-[#334155]">
                           <div className="max-h-[120px] overflow-y-auto py-1">
                             <button
                               type="button"
                               className={cn(
-                                "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[#f5f5f5]",
+                                "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[#f5f5f5] dark:hover:bg-[#1e293b]",
                                 projectId == null
-                                  ? "bg-[#f5f5f5] text-[#1e2939]"
-                                  : "text-[#4a5565]",
+                                  ? "bg-[#f5f5f5] text-[#1e2939] dark:bg-[#1e293b] dark:text-[#f1f5f9]"
+                                  : "text-[#4a5565] dark:text-[#94a3b8]",
                               )}
                               onClick={() => {
                                 setProjectId(null);
@@ -254,10 +274,10 @@ export function TimesheetRow({
                                 key={project.id}
                                 type="button"
                                 className={cn(
-                                  "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[#f5f5f5]",
+                                  "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[#f5f5f5] dark:hover:bg-[#1e293b]",
                                   projectId === project.id
-                                    ? "bg-[#f5f5f5] text-[#1e2939]"
-                                    : "text-[#4a5565]",
+                                    ? "bg-[#f5f5f5] text-[#1e2939] dark:bg-[#1e293b] dark:text-[#f1f5f9]"
+                                    : "text-[#4a5565] dark:text-[#94a3b8]",
                                 )}
                                 onClick={() => {
                                   setProjectId(project.id);
@@ -277,7 +297,7 @@ export function TimesheetRow({
                   <div className="flex items-center justify-end gap-2 pt-0.5">
                     <button
                       type="button"
-                      className="flex h-8 items-center justify-center rounded-lg border border-[#e6e6e6] bg-white px-3 text-xs font-medium leading-4 text-[#1e2939] hover:bg-[#fafafa]"
+                      className="flex h-8 items-center justify-center rounded-lg border border-[#e6e6e6] bg-white px-3 text-xs font-medium leading-4 text-[#1e2939] hover:bg-[#fafafa] dark:border-[#334155] dark:bg-card dark:text-[#f1f5f9] dark:hover:bg-[#1e293b]"
                       onClick={resetEdit}
                       disabled={saving}
                     >
@@ -328,8 +348,8 @@ export function TimesheetRow({
           <DialogHeader className="space-y-1">
             <DialogTitle className="text-sm">Delete time entry?</DialogTitle>
             <DialogDescription className="text-xs">
-              This removes &ldquo;{title}&rdquo; ({duration}) from today&apos;s timesheet.
-              This action cannot be undone.
+              This removes &ldquo;{title}&rdquo; ({duration}) from today&apos;s timesheet. This
+              action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-2">

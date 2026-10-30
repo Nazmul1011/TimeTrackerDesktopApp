@@ -35,8 +35,8 @@ export function formatTimesheetDuration(seconds: number): string {
   const total = Math.max(0, Math.floor(seconds));
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
-  if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}`;
-  return `00:${String(minutes).padStart(2, "0")}`;
+  const secs = total % 60;
+  return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
 export function codeFromProjectName(name: string): string {

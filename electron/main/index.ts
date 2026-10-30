@@ -7,18 +7,41 @@ import { app, BrowserWindow } from "electron";
 import log from "electron-log/main";
 import { config as loadEnv } from "dotenv";
 import path from "path";
+import { applyDockIcon, applyDockIconSoon } from "../utils/dock-icon";
 
 import { createMainWindow } from "./window";
+import { applyNativeTheme } from "./theme";
 import { createTray } from "./tray";
 import { createAppMenu } from "./menu";
 import { initAutoUpdater } from "./updater";
 import { applySecurityDefaults } from "./security";
-import { startRendererServer, stopRendererServer } from "./renderer-server";
+import { stopRendererServer } from "./renderer-server";
 import { registerIpcHandlers } from "../ipc";
 import { initDatabase } from "../database/sqlite";
 import { SettingsService } from "../services/settings";
+import { WindowRevealService } from "../services/window-reveal";
+import { AppIconService, registerAppIconScheme } from "../services/app-icon";
+
+if (process.platform === "darwin") {
+  // Must run before app.whenReady(). ScreenCaptureKit pickers re-prompt
+  // "record screen and audio" even when Screen Recording is already on.
+  app.commandLine.appendSwitch(
+    "disable-features",
+    [
+      "ScreenCaptureKitPickerScreen",
+      "ScreenCaptureKitStreamPickerSonoma",
+      "ScreenCaptureKitStreamPickerVentura",
+      "UseSCContentSharingPicker",
+      "ThumbnailCapturerMac:capture_mode/sc_screenshot_manager",
+      "MacCatapLoopbackAudioForScreenShare",
+    ].join(","),
+  );
+}
 
 loadEnv();
+
+// Custom icon protocol must be registered before app is ready.
+registerAppIconScheme();
 
 log.transports.file.level = "info";
 log.info("[main] Starting Gr8r Time Tracker desktop client");
@@ -34,6 +57,7 @@ if (process.platform === "linux") {
   );
 }
 
+// Must be set before ready — required for Windows toast notifications.
 if (process.platform === "win32") {
   app.setAppUserModelId("com.gr8r.timetracker");
 }
@@ -46,55 +70,84 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    const win = BrowserWindow.getAllWindows()[0];
-    if (win) {
-      if (win.isMinimized()) win.restore();
-      win.focus();
-    }
+    WindowRevealService.getInstance().revealNow();
   });
 }
 
 let mainWindow: BrowserWindow | null = null;
+let isQuitting = false;
 
 async function bootstrap(): Promise<void> {
   applySecurityDefaults();
-
-  if (app.isPackaged) {
-    await startRendererServer();
-  }
-
+  AppIconService.getInstance().bindProtocol();
   initDatabase();
   registerIpcHandlers();
   SettingsService.getInstance().applyStoredLoginItem();
+  applyNativeTheme(SettingsService.getInstance().get().theme);
 
+  applyDockIconSoon();
   mainWindow = createMainWindow();
+
+  // Keep tracking alive when the user closes the window — hide to tray/dock instead.
+  mainWindow.on("close", (event) => {
+    if (isQuitting) return;
+    event.preventDefault();
+    mainWindow?.hide();
+    log.info("[main] window hidden (tracking continues)");
+  });
+
   createAppMenu(mainWindow);
   createTray(mainWindow);
   initAutoUpdater(mainWindow);
 }
 
 app.whenReady().then(() => {
+  // Dev runs the stock Electron.app, so the Dock stays the atom until this runs.
+  applyDockIcon();
   void bootstrap().catch((err) => {
     log.error("[main] Bootstrap failed", err);
     app.quit();
   });
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    if (!mainWindow || mainWindow.isDestroyed()) {
       mainWindow = createMainWindow();
+      return;
     }
+    // Do not go through WindowRevealService — steal-focus + dock.show blanks the tile.
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    if (!mainWindow.isVisible()) mainWindow.show();
+    mainWindow.focus();
   });
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
+  // Window is hidden to tray, not destroyed — do not quit here.
+});
+
+let hasStoppedOnQuit = false;
+
+app.on("before-quit", (event) => {
+  log.info("[main] Application quitting");
+  if (!hasStoppedOnQuit && mainWindow && !mainWindow.isDestroyed()) {
+    hasStoppedOnQuit = true;
+    isQuitting = true;
+    event.preventDefault();
+    try {
+      mainWindow.webContents.send("tray:command", { action: "stopAndQuit" });
+      setTimeout(() => {
+        app.exit(0);
+      }, 2500);
+    } catch {
+      app.exit(0);
+    }
+  } else {
+    isQuitting = true;
   }
 });
 
-app.on("before-quit", () => {
+app.on("will-quit", () => {
   stopRendererServer();
-  log.info("[main] Application quitting");
 });
 
 // Help TypeScript / tooling resolve resources path in packaged builds

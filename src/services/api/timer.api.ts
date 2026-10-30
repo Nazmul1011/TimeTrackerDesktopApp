@@ -4,6 +4,7 @@
 import { apiClient, ensureDeviceId } from "./client";
 import type { ApiResponse, ApiTimer } from "./types";
 import { isValidProjectId } from "@/lib/project";
+import { getUserTimezone } from "@/lib/org-date";
 
 export type StartTimerPayload = {
   projectId?: string;
@@ -18,8 +19,16 @@ export type StopTimerPayload = {
   occurredAt?: string;
 };
 
+/** Short enough that a dead network falls back to the offline outbox quickly. */
+const TIMER_REQUEST_TIMEOUT_MS = 8_000;
+
 export type DeviceTimerPayload = {
   deviceId?: string;
+  /**
+   * When the pause/resume really happened (ISO-8601). The server uses it
+   * instead of its own arrival time, so a delayed or replayed request still
+   * lands at the right moment.
+   */
   occurredAt?: string;
 };
 
@@ -44,11 +53,9 @@ export const timerApi = {
     if (payload.occurredAt) {
       body.occurredAt = payload.occurredAt;
     }
-    const { data } = await apiClient.post<ApiResponse<{ timer: ApiTimer }>>(
-      "/timer/start",
-      body,
-      { timeout: 8000 },
-    );
+    const { data } = await apiClient.post<ApiResponse<{ timer: ApiTimer }>>("/timer/start", body, {
+      timeout: TIMER_REQUEST_TIMEOUT_MS,
+    });
     return data.data.timer;
   },
 
@@ -62,11 +69,9 @@ export const timerApi = {
     if (payload.occurredAt) {
       body.occurredAt = payload.occurredAt;
     }
-    const { data } = await apiClient.post<ApiResponse<StopTimerResult>>(
-      "/timer/stop",
-      body,
-      { timeout: 8000 },
-    );
+    const { data } = await apiClient.post<ApiResponse<StopTimerResult>>("/timer/stop", body, {
+      timeout: TIMER_REQUEST_TIMEOUT_MS,
+    });
     return data.data ?? { entries: [], count: 0, totalDurationSeconds: 0 };
   },
 
@@ -77,7 +82,7 @@ export const timerApi = {
         ...payload,
         deviceId: payload.deviceId ?? ensureDeviceId(),
       },
-      { timeout: 8000 },
+      { timeout: TIMER_REQUEST_TIMEOUT_MS },
     );
     return data.data.timer;
   },
@@ -89,15 +94,13 @@ export const timerApi = {
         ...payload,
         deviceId: payload.deviceId ?? ensureDeviceId(),
       },
-      { timeout: 8000 },
+      { timeout: TIMER_REQUEST_TIMEOUT_MS },
     );
     return data.data.timer;
   },
 
   async sync(payload: DeviceTimerPayload = {}) {
-    const { data } = await apiClient.post<
-      ApiResponse<{ timer: ApiTimer } | null>
-    >("/timer/sync", {
+    const { data } = await apiClient.post<ApiResponse<{ timer: ApiTimer } | null>>("/timer/sync", {
       ...payload,
       deviceId: payload.deviceId ?? ensureDeviceId(),
     });
@@ -105,13 +108,41 @@ export const timerApi = {
   },
 
   async current() {
-    const { data } = await apiClient.get<
-      ApiResponse<{ timer: ApiTimer } | ApiTimer | null>
-    >("/timer/current");
+    const { data } =
+      await apiClient.get<ApiResponse<{ timer: ApiTimer } | ApiTimer | null>>("/timer/current");
     const payload = data.data;
     if (!payload) return null;
     if ("timer" in payload && payload.timer) return payload.timer;
     if ("id" in payload && "startTime" in payload) return payload as ApiTimer;
     return null;
+  },
+
+  /** Discard the live session and delete today's timesheet + activity for this user. */
+  async resetDay(timezone?: string) {
+    const { data } = await apiClient.post<
+      ApiResponse<{
+        date?: string;
+        entriesDeleted?: number;
+        activitiesDeleted?: number;
+      }>
+    >("/timer/reset-day", {
+      timezone: timezone ?? getUserTimezone(),
+    });
+    return data.data;
+  },
+
+  /** Split the live session at midnight, saving yesterday and advancing start time to 00:00:00. */
+  async midnightSplit(occurredAt?: string, timezone?: string) {
+    const { data } = await apiClient.post<
+      ApiResponse<{
+        split: boolean;
+        yesterdayEntry?: unknown;
+        runningTimer?: ApiTimer;
+      }>
+    >("/timer/midnight-split", {
+      occurredAt,
+      timezone: timezone ?? getUserTimezone(),
+    });
+    return data.data;
   },
 };

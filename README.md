@@ -6,15 +6,15 @@ Part of the Gr8r monorepo alongside `TimeTrackerBackend` (API, ~3001) and `TimeT
 
 ## Tech Stack
 
-| Layer | Technology |
-| --- | --- |
-| Desktop shell | Electron |
-| UI | Next.js (App Router), React, TypeScript |
-| Styling | TailwindCSS, shadcn/ui |
-| State | Zustand |
-| API | Axios → NestJS backend |
-| Local DB | better-sqlite3 (optional, Electron main process) |
-| Packaging | electron-builder, electron-updater |
+| Layer         | Technology                                       |
+| ------------- | ------------------------------------------------ |
+| Desktop shell | Electron                                         |
+| UI            | Next.js (App Router), React, TypeScript          |
+| Styling       | TailwindCSS, shadcn/ui                           |
+| State         | Zustand                                          |
+| API           | Axios → NestJS backend                           |
+| Local DB      | better-sqlite3 (optional, Electron main process) |
+| Packaging     | electron-builder, electron-updater               |
 
 ## Getting Started
 
@@ -38,15 +38,16 @@ This starts Next.js and opens the **Electron window** (~446×640). Activity trac
 
 ### Scripts
 
-| Script | Description |
-| --- | --- |
-| `npm run dev` / `npm start` | Desktop app — Next.js + Electron |
-| `npm run dev:web` | Renderer only (browser debugging) |
-| `npm run electron:dev` | Same as `dev` |
-| `npm run build` | Build Next.js renderer |
-| `npm run electron:build` | Package desktop installers |
-| `npm run lint` | ESLint |
-| `npm run typecheck` | TypeScript (renderer + Electron) |
+| Script                         | Description                       |
+| ------------------------------ | --------------------------------- |
+| `npm run dev` / `npm start`    | Desktop app — Next.js + Electron  |
+| `npm run dev:web`              | Renderer only (browser debugging) |
+| `npm run electron:dev`         | Same as `dev`                     |
+| `npm run build`                | Build Next.js renderer            |
+| `npm run electron:build`       | Package desktop installers        |
+| `npm run electron:build:linux` | Package AppImage + deb            |
+| `npm run lint`                 | ESLint                            |
+| `npm run typecheck`            | TypeScript (renderer + Electron)  |
 
 ## Architecture
 
@@ -66,23 +67,30 @@ TimeTrackerDesktopApp/
 - **Timesheet** — today's entries with edit (description/project) and delete
 - **Summary** — live top apps and daily stats from backend
 - **Profile** — edit name, phone, timezone via `PATCH /users/me`
-- **Settings** — notifications, launch on login, screenshot interval (theme: light only)
+- **Settings** — notifications, launch on login, screenshot interval, light / dark / system theme
 - **Notifications** — live inbox, push/idle toggles, deep links to home tabs
+
+- **Tray** — timer controls, sign out, quit; closing the window keeps tracking running
+- **Offline** — timer events, activity and screenshots queue on disk and replay in order on reconnect
+
+### Linux runtime dependencies
+
+Idle detection needs `xinput`; Top Apps needs `xdotool` and `xprop`. The deb declares them; AppImage users install them separately. Idle and active-window detection are X11-only.
 
 ### Routes
 
-| Path | Purpose |
-| --- | --- |
-| `/login` | Authentication |
-| `/home` | Timer + Summary / Timesheet / Screenshots tabs |
-| `/profile` | View and edit profile |
-| `/settings` | Preferences |
-| `/notifications` | Inbox + admin screenshot deletion review |
+| Path             | Purpose                                        |
+| ---------------- | ---------------------------------------------- |
+| `/login`         | Authentication                                 |
+| `/home`          | Timer + Summary / Timesheet / Screenshots tabs |
+| `/profile`       | View and edit profile                          |
+| `/settings`      | Preferences                                    |
+| `/notifications` | Inbox + admin screenshot deletion review       |
 
 ## Environment
 
-| Variable | Default | Description |
-| --- | --- | --- |
+| Variable              | Default                 | Description          |
+| --------------------- | ----------------------- | -------------------- |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:3001` | Backend API base URL |
 
 ## License

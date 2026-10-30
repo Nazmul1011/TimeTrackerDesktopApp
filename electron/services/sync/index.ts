@@ -16,6 +16,7 @@ export type SyncStatus = {
 
 type ApiEnvelope<T> = {
   success?: boolean;
+  code?: string;
   message?: string;
   data?: T;
 };
@@ -27,6 +28,8 @@ export class SyncService {
   private lastSyncedAt: string | null = null;
   private lastError: string | null = null;
   private interval: NodeJS.Timeout | null = null;
+  /** Org that refused us with `org_access_denied`; no retries until auth changes. */
+  private blockedOrgId: string | null = null;
 
   static getInstance(): SyncService {
     if (!SyncService.instance) {
@@ -47,6 +50,10 @@ export class SyncService {
       clearInterval(this.interval);
       this.interval = null;
     }
+  }
+
+  clearOrgBlock() {
+    this.blockedOrgId = null;
   }
 
   schedule(delayMs = 1200) {
@@ -92,16 +99,33 @@ export class SyncService {
         status: this.getStatus(),
       };
     }
+    if (this.blockedOrgId === auth.organizationId) {
+      return {
+        ok: false,
+        message: "no access to organization",
+        status: this.getStatus(),
+      };
+    }
 
     this.flushing = true;
     this.emitStatus();
     try {
       const timerResult = await this.flushTimerEvents(auth);
+      if (timerResult.blocked) {
+        this.blockOrganization(auth.organizationId);
+        this.lastError = timerResult.message ?? "no access to organization";
+        return { ok: false, message: this.lastError, status: this.getStatus() };
+      }
       if (!timerResult.ok && timerResult.network) {
         this.lastError = timerResult.message ?? "offline";
         return { ok: false, message: this.lastError, status: this.getStatus() };
       }
       const activityResult = await this.flushActivities(auth);
+      if (activityResult.blocked) {
+        this.blockOrganization(auth.organizationId);
+        this.lastError = activityResult.message ?? "no access to organization";
+        return { ok: false, message: this.lastError, status: this.getStatus() };
+      }
       if (!activityResult.ok && activityResult.network) {
         this.lastError = activityResult.message ?? "offline";
         return { ok: false, message: this.lastError, status: this.getStatus() };
@@ -118,10 +142,7 @@ export class SyncService {
         this.lastSyncedAt = new Date().toISOString();
       } else {
         this.lastError =
-          timerResult.message ??
-          activityResult.message ??
-          shotResult.message ??
-          "Sync incomplete";
+          timerResult.message ?? activityResult.message ?? shotResult.message ?? "Sync incomplete";
       }
       const pending = OfflineQueue.getInstance().getPendingCounts();
       if (pending.timer + pending.activity + pending.screenshots === 0 && ok) {
@@ -129,8 +150,7 @@ export class SyncService {
       }
       return { ok, message: this.lastError ?? undefined, status: this.getStatus() };
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Sync failed";
+      const message = error instanceof Error ? error.message : "Sync failed";
       this.lastError = message;
       log.warn("[SyncService] run failed", error);
       return { ok: false, message, status: this.getStatus() };
@@ -140,9 +160,20 @@ export class SyncService {
     }
   }
 
+  private blockOrganization(organizationId: string) {
+    this.blockedOrgId = organizationId;
+    log.warn("[SyncService] organization refused access — keeping the outbox queued");
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send("sync:org-access-denied", { organizationId });
+      }
+    }
+  }
+
   private async flushTimerEvents(auth: TrackingAuth): Promise<{
     ok: boolean;
     network?: boolean;
+    blocked?: boolean;
     message?: string;
   }> {
     const queue = OfflineQueue.getInstance();
@@ -153,11 +184,16 @@ export class SyncService {
         queue.markTimerEventSynced(event.id);
         continue;
       }
+      if (result.blocked) {
+        return { ok: false, blocked: true, message: result.message };
+      }
       if (result.network) {
         return { ok: false, network: true, message: result.message };
       }
-      log.warn(`[SyncService] timer event ${event.type} failed`, result.message);
-      return { ok: false, message: result.message };
+      // Rejected for good (e.g. occurredAt older than the server accepts).
+      // Retrying can't help and would hold every later event behind it.
+      log.warn(`[SyncService] timer event ${event.type} rejected`, result.message);
+      queue.markTimerEventFailed(event.id, result.message ?? "rejected");
     }
     return { ok: true };
   }
@@ -165,7 +201,13 @@ export class SyncService {
   private async replayTimerEvent(
     auth: TrackingAuth,
     event: TimerEventRow,
-  ): Promise<{ ok: boolean; skip?: boolean; network?: boolean; message?: string }> {
+  ): Promise<{
+    ok: boolean;
+    skip?: boolean;
+    network?: boolean;
+    blocked?: boolean;
+    message?: string;
+  }> {
     const pathByType: Record<TimerEventRow["type"], string> = {
       start: "/timer/start",
       pause: "/timer/pause",
@@ -188,15 +230,19 @@ export class SyncService {
     if (response.network) {
       return { ok: false, network: true, message: response.message };
     }
+    // Checked first: with TENANT_DENY_STATUS=404 this refusal looks like the
+    // "timer gone" cases below, and those would drop the event as done.
+    if (response.blocked) {
+      return { ok: false, blocked: true, message: response.message };
+    }
     if (response.status === 409 && event.type === "start") {
       const recovered = await this.recoverConflictingStart(auth, event, body);
       if (recovered.ok || recovered.skip) return recovered;
       return recovered;
     }
-    if (response.status === 404 && (event.type === "pause" || event.type === "resume")) {
-      return { ok: false, message: response.message ?? "timer not on server yet" };
-    }
-    if (response.status === 404 && event.type === "stop") {
+    // Replay is ordered, so any queued start already ran: a 404 means the server
+    // ended this timer (the 5-minute watchdog during an offline stretch).
+    if (response.status === 404 && event.type !== "start") {
       return { ok: true, skip: true };
     }
     if (response.ok) return { ok: true };
@@ -250,6 +296,7 @@ export class SyncService {
   private async flushActivities(auth: TrackingAuth): Promise<{
     ok: boolean;
     network?: boolean;
+    blocked?: boolean;
     message?: string;
   }> {
     const queue = OfflineQueue.getInstance();
@@ -260,6 +307,9 @@ export class SyncService {
       method: "POST",
       body: { activities: batch.map((row) => row.payload) },
     });
+    if (response.blocked) {
+      return { ok: false, blocked: true, message: response.message };
+    }
     if (response.network) {
       return { ok: false, network: true, message: response.message };
     }
@@ -311,6 +361,7 @@ export class SyncService {
     ok: boolean;
     status: number;
     network?: boolean;
+    blocked?: boolean;
     message?: string;
   }> {
     const url = `${auth.apiBaseUrl.replace(/\/$/, "")}${pathname}`;
@@ -340,7 +391,16 @@ export class SyncService {
         }
       }
       const json = (await response.json().catch(() => null)) as ApiEnvelope<unknown> | null;
-      if (response.status >= 500 || response.status === 429) {
+      if (json?.code === "org_access_denied") {
+        return { ok: false, status: response.status, blocked: true, message: json.message };
+      }
+      // 401: the refresh above failed too. The event is fine, the session isn't.
+      if (
+        response.status >= 500 ||
+        response.status === 429 ||
+        response.status === 408 ||
+        response.status === 401
+      ) {
         return {
           ok: false,
           status: response.status,

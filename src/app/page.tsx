@@ -1,6 +1,3 @@
-/**
- * Root page — client redirect to /home (static-export friendly).
- */
 "use client";
 
 import { useEffect } from "react";

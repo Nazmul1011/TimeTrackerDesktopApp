@@ -1,7 +1,7 @@
 /**
- * Persistent desktop storage via electron-store (survives app restarts).
- * Auth must live here — production serves the renderer on a new localhost
- * port each launch, so Chromium localStorage is a different origin every time.
+ * Storage Service — electron-store for settings + durable auth session.
+ * Auth must live here so Quit/reopen keeps the user signed in even if the
+ * renderer origin/port changes.
  */
 import log from "electron-log/main";
 
@@ -10,47 +10,42 @@ export type PersistedAuthSession = {
   refreshToken: string | null;
   sessionToken: string | null;
   organizationId: string | null;
+  user: unknown | null;
+  organizations: unknown[] | null;
   deviceId: string | null;
 };
 
 type StoreSchema = {
   settings: Record<string, unknown>;
-  auth: PersistedAuthSession;
-};
-
-const EMPTY_AUTH: PersistedAuthSession = {
-  accessToken: null,
-  refreshToken: null,
-  sessionToken: null,
-  organizationId: null,
-  deviceId: null,
+  authToken: string | null;
+  authSession: PersistedAuthSession | null;
+  /** Pre-0.1.4 Linux builds stored the session here; read once, then replaced. */
+  auth?: Partial<PersistedAuthSession> | null;
 };
 
 type StoreLike = {
   get: <K extends keyof StoreSchema>(key: K) => StoreSchema[K];
   set: <K extends keyof StoreSchema>(key: K, value: StoreSchema[K]) => void;
+  delete: (key: keyof StoreSchema) => void;
 };
 
-function normalizeAuth(raw: unknown): PersistedAuthSession {
-  if (!raw || typeof raw !== "object") return { ...EMPTY_AUTH };
-  const value = raw as Record<string, unknown>;
-  const asString = (key: string) =>
-    typeof value[key] === "string" && value[key] ? (value[key] as string) : null;
-  return {
-    accessToken: asString("accessToken"),
-    refreshToken: asString("refreshToken"),
-    sessionToken: asString("sessionToken"),
-    organizationId: asString("organizationId"),
-    deviceId: asString("deviceId"),
-  };
-}
+const EMPTY_SESSION: PersistedAuthSession = {
+  accessToken: null,
+  refreshToken: null,
+  sessionToken: null,
+  organizationId: null,
+  user: null,
+  organizations: null,
+  deviceId: null,
+};
 
 export class StorageService {
   private static instance: StorageService | null = null;
   private store: StoreLike | null = null;
   private memory: StoreSchema = {
     settings: {},
-    auth: { ...EMPTY_AUTH },
+    authToken: null,
+    authSession: null,
   };
 
   private constructor() {
@@ -86,20 +81,43 @@ export class StorageService {
     }
   }
 
-  getAuthSession(): PersistedAuthSession {
-    return normalizeAuth(this.store?.get("auth") ?? this.memory.auth);
+  getAuthToken(): string | null {
+    const session = this.getAuthSession();
+    if (session?.accessToken) return session.accessToken;
+    return this.store?.get("authToken") ?? this.memory.authToken;
   }
 
-  setAuthSession(session: PersistedAuthSession): void {
-    const next = normalizeAuth(session);
+  setAuthToken(token: string | null): void {
     if (this.store) {
-      this.store.set("auth", next);
+      this.store.set("authToken", token);
     } else {
-      this.memory.auth = next;
+      this.memory.authToken = token;
     }
   }
 
+  getAuthSession(): PersistedAuthSession | null {
+    const raw =
+      this.store?.get("authSession") ?? this.store?.get("auth") ?? this.memory.authSession;
+    if (!raw || typeof raw !== "object") return null;
+    return {
+      ...EMPTY_SESSION,
+      ...raw,
+    };
+  }
+
+  setAuthSession(session: PersistedAuthSession | null): void {
+    if (this.store) {
+      this.store.set("authSession", session);
+      this.store.set("authToken", session?.accessToken ?? null);
+      this.store.delete("auth");
+    } else {
+      this.memory.authSession = session;
+      this.memory.authToken = session?.accessToken ?? null;
+    }
+    log.info(`[StorageService] auth session ${session?.accessToken ? "saved" : "cleared"}`);
+  }
+
   clearAuthSession(): void {
-    this.setAuthSession({ ...EMPTY_AUTH });
+    this.setAuthSession(null);
   }
 }

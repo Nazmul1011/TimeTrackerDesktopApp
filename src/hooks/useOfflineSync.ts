@@ -11,6 +11,7 @@ import { timerApi } from "@/services/api/timer.api";
 import { timesheetApi } from "@/services/api/timesheet.api";
 import { useAuthStore } from "@/store/auth.store";
 import { useTimerStore } from "@/store/timer.store";
+import { isOfflineNow } from "@/lib/network";
 import { persistLocalTimer } from "@/services/timer/offline-persist";
 import { useOfflineStore } from "@/store/offline.store";
 import { dispatchTimerStopped } from "@/lib/timer-events";
@@ -39,15 +40,15 @@ export function useOfflineSync() {
       const pending = status.pending ?? { timer: 0, activity: 0, screenshots: 0 };
       useOfflineStore.getState().setPending(pending);
       useOfflineStore.getState().setSyncing(status.status === "syncing");
-      useOfflineStore
-        .getState()
-        .setOnline(typeof navigator === "undefined" ? true : navigator.onLine);
+      useOfflineStore.getState().setOnline(!isOfflineNow());
     };
 
     const restore = async () => {
       const snapshot = await api.sync.getLocalTimer();
       if (cancelled) return;
-      if (snapshot) {
+      // A synced snapshot only matters with no network: otherwise the server's
+      // timer is newer and restoring would resurrect an already-ended session.
+      if (snapshot && (snapshot.isOffline || isOfflineNow())) {
         restoreOfflineSnapshot(snapshot);
       }
       const counts = await api.sync.pendingCounts();
@@ -70,22 +71,17 @@ export function useOfflineSync() {
 
       const justSyncedTimer =
         pending.timer === 0 &&
-        (previousTimerPending > 0 ||
-          useTimerStore.getState().isOfflineSession);
+        (previousTimerPending > 0 || useTimerStore.getState().isOfflineSession);
       previousTimerPending = pending.timer;
       if (!justSyncedTimer) return;
 
-      const localStatus = useTimerStore.getState().timer.status;
       try {
+        // The outbox is empty, so the server now knows everything we do. No
+        // timer there means it ended (e.g. the watchdog ran while we were away).
         const current = await timerApi.current();
-        if (current) {
-          setOfflineSession(false);
-          hydrateFromApi(current);
-        } else if (localStatus === "idle") {
-          setOfflineSession(false);
-          hydrateFromApi(null);
-        }
-        if (localStatus === "idle") {
+        setOfflineSession(false);
+        hydrateFromApi(current);
+        if (!current) {
           const seconds = await timesheetApi.getTodayLoggedSeconds();
           setTodayLoggedSeconds(seconds);
           dispatchTimerStopped({
@@ -105,6 +101,15 @@ export function useOfflineSync() {
 
     const unsub = api.sync.onStatus?.((payload) => {
       applyStatus(payload);
+    });
+
+    const unsubDenied = api.sync.onOrgAccessDenied?.(() => {
+      const queued = useOfflineStore.getState().pending.timer;
+      toast.error(
+        queued > 0
+          ? `You no longer have access to this organization. ${queued} unsynced ${queued === 1 ? "entry" : "entries"} kept.`
+          : "You no longer have access to this organization.",
+      );
     });
 
     const onOnline = () => {
@@ -130,6 +135,7 @@ export function useOfflineSync() {
     return () => {
       cancelled = true;
       unsub?.();
+      unsubDenied?.();
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
       window.clearInterval(interval);

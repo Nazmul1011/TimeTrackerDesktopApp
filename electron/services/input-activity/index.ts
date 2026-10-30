@@ -6,7 +6,6 @@ import log from "electron-log/main";
 import { IdleService } from "../idle";
 
 const TICK_MS = 250;
-const TICKS_PER_IDLE_SECOND = 1000 / TICK_MS;
 const ACTIVE_WINDOW_MS = 1_000;
 
 export class InputActivityMonitor {
@@ -15,8 +14,6 @@ export class InputActivityMonitor {
   private tickTimer: NodeJS.Timeout | null = null;
   private activeSamples = 0;
   private idleSamples = 0;
-  private consecutiveIdleSeconds = 0;
-  private consecutiveIdleTicks = 0;
   private intervalSeconds = 300;
   private idleEmitted = false;
   private onIdleForInterval: (() => void) | null = null;
@@ -31,14 +28,10 @@ export class InputActivityMonitor {
   start(intervalMs: number, onIdleForInterval: (() => void) | null) {
     this.stop();
     this.resetWindow();
-    this.consecutiveIdleSeconds = 0;
-    this.consecutiveIdleTicks = 0;
     this.idleEmitted = false;
     this.onIdleForInterval = onIdleForInterval;
     this.intervalSeconds =
-      intervalMs > 0
-        ? Math.max(30, Math.round(intervalMs / 1000))
-        : Number.MAX_SAFE_INTEGER;
+      intervalMs > 0 ? Math.max(30, Math.round(intervalMs / 1000)) : Number.MAX_SAFE_INTEGER;
     IdleService.getInstance().startWatching();
     this.tickTimer = setInterval(() => this.tick(), TICK_MS);
     this.tick();
@@ -85,28 +78,22 @@ export class InputActivityMonitor {
   }
 
   private tick() {
-    const active = IdleService.getInstance().hadRecentInput(ACTIVE_WINDOW_MS);
+    const idleMs = IdleService.getInstance().getMsSinceLastInput();
+    const active = idleMs < ACTIVE_WINDOW_MS;
     if (active) {
       this.activeSamples += 1;
-      this.consecutiveIdleTicks = 0;
-      this.consecutiveIdleSeconds = 0;
-      return;
+    } else {
+      this.idleSamples += 1;
     }
 
-    this.idleSamples += 1;
-    this.consecutiveIdleTicks += 1;
-    if (this.consecutiveIdleTicks >= TICKS_PER_IDLE_SECOND) {
-      this.consecutiveIdleTicks = 0;
-      this.consecutiveIdleSeconds += 1;
-    }
-
-    if (
-      !this.idleEmitted &&
-      this.consecutiveIdleSeconds >= this.intervalSeconds
-    ) {
+    const intervalMs =
+      this.intervalSeconds < Number.MAX_SAFE_INTEGER
+        ? this.intervalSeconds * 1000
+        : Number.POSITIVE_INFINITY;
+    if (!this.idleEmitted && Number.isFinite(intervalMs) && idleMs >= intervalMs) {
       this.idleEmitted = true;
       log.info(
-        `[InputActivityMonitor] idle for ${this.consecutiveIdleSeconds}s — requesting timer pause`,
+        `[InputActivityMonitor] idle for ${Math.round(idleMs / 1000)}s — requesting timer pause`,
       );
       this.onIdleForInterval?.();
     }

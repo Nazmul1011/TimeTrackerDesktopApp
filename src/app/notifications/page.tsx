@@ -9,12 +9,14 @@ import { toast } from "sonner";
 import { FigmaGlyph } from "@/components/icons/figma-glyph";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { ROUTES } from "@/constants/routes";
-import { useNotificationNavigation } from "@/hooks/useNotificationNavigation";
 import { useNotifications } from "@/hooks/useNotifications";
 import { dayjs } from "@/lib/dayjs";
-import { useSettingsStore } from "@/store/settings.store";
+import {
+  DEFAULT_IDLE_TIMEOUT_MINUTES,
+  formatIdleTimeoutLabel,
+  useSettingsStore,
+} from "@/store/settings.store";
 import { ScreenshotDeletionReview } from "@/components/screenshots/screenshot-deletion-review";
 import type { AppNotification, NotificationKind } from "@/types";
 import { cn } from "@/lib/utils";
@@ -45,30 +47,24 @@ function InboxItem({
     <li
       className={cn(
         "rounded-lg border border-[var(--border-subtle)] p-3",
-        notification.read ? "bg-white" : "bg-[var(--surface-elevated)]",
+        notification.read ? "bg-white dark:bg-card" : "bg-[var(--surface-elevated)]",
       )}
     >
-      <button
-        type="button"
-        className="w-full text-left"
-        onClick={() => onOpen(notification)}
-      >
+      <button type="button" className="w-full text-left" onClick={() => onOpen(notification)}>
         <div className="flex items-start gap-3">
-          <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-[#ebebeb]">
+          <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-[#ebebeb] dark:bg-[#334155]">
             <FigmaGlyph src={iconForKind(notification.kind)} size={16} />
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-2">
-              <p className="text-xs font-medium text-[#1e2939]">
+              <p className="text-xs font-medium text-[#1e2939] dark:text-[#f1f5f9]">
                 {notification.title}
               </p>
               <span className="shrink-0 text-[10px] text-[var(--text-muted)]">
                 {dayjs(notification.createdAt).fromNow()}
               </span>
             </div>
-            <p className="mt-1 text-xs leading-4 text-[var(--text-subtle)]">
-              {notification.body}
-            </p>
+            <p className="mt-1 text-xs leading-4 text-[var(--text-subtle)]">{notification.body}</p>
           </div>
         </div>
       </button>
@@ -77,7 +73,11 @@ function InboxItem({
           <button
             type="button"
             className="text-[11px] font-medium text-[var(--brand)]"
-            onClick={() => onMarkRead(notification.id)}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onMarkRead(notification.id);
+            }}
           >
             Mark as read
           </button>
@@ -86,8 +86,12 @@ function InboxItem({
         )}
         <button
           type="button"
-          className="text-[11px] text-[var(--text-muted)] hover:text-[#1e2939]"
-          onClick={() => onDismiss(notification.id)}
+          className="text-[11px] text-[var(--text-muted)] hover:text-[#1e2939] dark:hover:text-[#f1f5f9]"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onDismiss(notification.id);
+          }}
         >
           Dismiss
         </button>
@@ -111,11 +115,10 @@ export default function NotificationsPage() {
     markAllAsRead,
     deleteNotification,
   } = useNotifications({ poll: true, pollList: true });
-  const { navigateFromNotification } = useNotificationNavigation();
 
+  // Stay on this page — only update read state, do not route to Home.
   const handleOpenNotification = (notification: AppNotification) => {
     if (!notification.read) void markAsRead(notification.id);
-    navigateFromNotification(notification.actionUrl);
   };
 
   useEffect(() => {
@@ -162,12 +165,10 @@ export default function NotificationsPage() {
       </div>
 
       <div className="surface-card w-full overflow-hidden">
-        <div className="flex items-center justify-between border-b border-[#e5e5e5] px-4 py-3">
+        <div className="flex items-center justify-between border-b border-[#e5e5e5] px-4 py-3 dark:border-[#334155]">
           <div>
-            <p className="text-xs text-[#1e2939]">Push Notifications</p>
-            <p className="text-xs text-[var(--text-muted)]">
-              Timer reminders & alerts
-            </p>
+            <p className="text-xs text-[#1e2939] dark:text-[#f1f5f9]">Push Notifications</p>
+            <p className="text-xs text-[var(--text-muted)]">Timer reminders & alerts</p>
           </div>
           <Switch
             checked={settings.notificationsEnabled}
@@ -182,12 +183,12 @@ export default function NotificationsPage() {
           />
         </div>
 
-        <div className="flex items-center justify-between border-b border-[#e5e5e5] px-4 py-3">
+        <div className="flex items-center justify-between border-b border-[#e5e5e5] px-4 py-3 dark:border-[#334155]">
           <div>
-            <p className="text-xs text-[#1e2939]">Idle Detection</p>
+            <p className="text-xs text-[#1e2939] dark:text-[#f1f5f9]">Idle Detection</p>
             <p className="text-xs text-[var(--text-muted)]">
               {settings.idleTimeoutMinutes > 0
-                ? `Auto-pause after ${settings.idleTimeoutMinutes} min idle`
+                ? `Auto-pause after ${formatIdleTimeoutLabel(settings.idleTimeoutMinutes)} idle`
                 : "Auto-pause when idle is off"}
             </p>
           </div>
@@ -197,10 +198,10 @@ export default function NotificationsPage() {
             onCheckedChange={(checked) => {
               void toggleSetting(
                 "idle",
-                { idleTimeoutMinutes: checked ? 3 : 0 },
-                checked
-                  ? "Idle detection on (3 min)"
-                  : "Idle detection off",
+                {
+                  idleTimeoutMinutes: checked ? DEFAULT_IDLE_TIMEOUT_MINUTES : 0,
+                },
+                checked ? "Idle detection on (2 min)" : "Idle detection off",
               );
             }}
           />
@@ -208,12 +209,10 @@ export default function NotificationsPage() {
 
         <div className="px-4 py-3">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <p className="text-xs font-medium text-[#1e2939]">
+            <p className="text-xs font-medium text-[#1e2939] dark:text-[#f1f5f9]">
               Inbox
               {unreadCount > 0 ? (
-                <span className="ml-1.5 text-[var(--text-muted)]">
-                  ({unreadCount} unread)
-                </span>
+                <span className="ml-1.5 text-[var(--text-muted)]">({unreadCount} unread)</span>
               ) : null}
             </p>
             {unreadCount > 0 ? (
@@ -227,11 +226,9 @@ export default function NotificationsPage() {
             ) : null}
           </div>
 
-          <ScrollArea className="h-[280px] pr-2">
+          <div className="scrollbar-hide h-[280px] overflow-y-auto">
             {isLoading && notifications.length === 0 ? (
-              <p className="py-6 text-center text-xs text-[var(--text-muted)]">
-                Loading…
-              </p>
+              <p className="py-6 text-center text-xs text-[var(--text-muted)]">Loading…</p>
             ) : error && notifications.length === 0 ? (
               <div className="py-6 text-center">
                 <p className="text-xs text-[var(--text-muted)]">{error}</p>
@@ -245,8 +242,8 @@ export default function NotificationsPage() {
               </div>
             ) : notifications.length === 0 ? (
               <p className="py-6 text-center text-xs text-[var(--text-muted)]">
-                No notifications yet. Alerts from leave, payroll, and screenshot
-                requests appear here.
+                No notifications yet. Alerts from leave, payroll, and screenshot requests appear
+                here.
               </p>
             ) : (
               <ul className="space-y-2">
@@ -261,7 +258,7 @@ export default function NotificationsPage() {
                 ))}
               </ul>
             )}
-          </ScrollArea>
+          </div>
         </div>
       </div>
 

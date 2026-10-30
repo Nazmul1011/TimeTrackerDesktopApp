@@ -3,12 +3,11 @@
  * Attaches auth/org/device headers and refreshes access token on 401.
  */
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
-import { STORAGE_KEYS } from "@/constants/storage";
-import { clearPersistedAuthSession, savePersistedAuthSession } from "@/services/electron/auth-session";
+import { AUTH_EVENTS, STORAGE_KEYS } from "@/constants/storage";
 import type { ApiResponse, AuthTokens } from "./types";
 
-const baseURL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001";
+const baseURL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001";
+const REFRESH_TIMEOUT_MS = 8_000;
 
 export const apiClient = axios.create({
   baseURL,
@@ -31,9 +30,79 @@ function getDeviceId(): string {
   return deviceId;
 }
 
-apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+function isAuthFailureStatus(status: number | undefined): boolean {
+  // Only a rejected refresh token should wipe login. 403 can be permission noise.
+  return status === 401;
+}
+
+function emitSessionInvalid() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(AUTH_EVENTS.SESSION_INVALID));
+}
+
+function emitTokenRefreshed(accessToken: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent(AUTH_EVENTS.TOKEN_REFRESHED, {
+      detail: { accessToken },
+    }),
+  );
+}
+
+function persistAccessToken(accessToken: string) {
+  localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, accessToken);
+  emitTokenRefreshed(accessToken);
+  // Keep durable Electron session in sync when only the access JWT rotates.
+  if (typeof window !== "undefined" && window.electronAPI?.auth?.saveSession) {
+    void window.electronAPI.auth.saveSession({
+      accessToken,
+      refreshToken: localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN),
+      sessionToken: localStorage.getItem(STORAGE_KEYS.SESSION_TOKEN),
+      organizationId: localStorage.getItem(STORAGE_KEYS.ORGANIZATION_ID),
+      user: (() => {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEYS.AUTH_USER);
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return null;
+        }
+      })(),
+      organizations: (() => {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEYS.AUTH_ORGANIZATIONS);
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return null;
+        }
+      })(),
+    });
+  }
+}
+
+function clearPersistedTokens() {
+  localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+  localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
+  localStorage.removeItem(STORAGE_KEYS.SESSION_TOKEN);
+}
+
+function isAuthRoute(url: string | undefined): boolean {
+  return Boolean(url && (url.includes("/auth/refresh") || url.includes("/auth/login")));
+}
+
+apiClient.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
   if (typeof window !== "undefined" && config.headers) {
-    const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+    let token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+    // After hours in the tray the token has expired. Refresh once up front
+    // instead of letting every request fail with 401 and retry.
+    if (
+      token &&
+      accessTokenExpiresSoon(token) &&
+      localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN) &&
+      !isAuthRoute(config.url)
+    ) {
+      const refreshed = await refreshOnce();
+      if (refreshed.status === "ok") token = refreshed.accessToken;
+    }
     const orgId = localStorage.getItem(STORAGE_KEYS.ORGANIZATION_ID);
     const sessionToken = localStorage.getItem(STORAGE_KEYS.SESSION_TOKEN);
 
@@ -57,49 +126,82 @@ apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   return config;
 });
 
-let refreshPromise: Promise<string | null> | null = null;
+/**
+ * "invalid": the server rejected the refresh token (login really ended).
+ * "unavailable": no answer (offline, server restarting, 5xx) — the login may
+ * still be fine, so the session must be kept.
+ */
+type RefreshResult =
+  { status: "ok"; accessToken: string } | { status: "invalid" } | { status: "unavailable" };
 
-async function refreshAccessToken(): Promise<string | null> {
-  if (typeof window === "undefined") return null;
+let refreshPromise: Promise<RefreshResult> | null = null;
+
+async function performRefresh(): Promise<RefreshResult> {
+  if (typeof window === "undefined") return { status: "unavailable" };
 
   const refreshToken = localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN);
-  if (!refreshToken) return null;
+  if (!refreshToken) return { status: "invalid" };
 
   try {
+    // Every request waiting on a new token waits on this one, so it must not
+    // hang (e.g. a dead connection right after the PC wakes).
     const response = await axios.post<ApiResponse<Pick<AuthTokens, "access_token">>>(
       `${baseURL}/auth/refresh`,
       { refreshToken },
-      { headers: { "Content-Type": "application/json" } },
+      { headers: { "Content-Type": "application/json" }, timeout: REFRESH_TIMEOUT_MS },
     );
     const newAccessToken = response.data.data.access_token;
-    localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, newAccessToken);
-    savePersistedAuthSession({
-      accessToken: newAccessToken,
-      refreshToken: localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN),
-      sessionToken: localStorage.getItem(STORAGE_KEYS.SESSION_TOKEN),
-      organizationId: localStorage.getItem(STORAGE_KEYS.ORGANIZATION_ID),
-      deviceId: localStorage.getItem(STORAGE_KEYS.DEVICE_ID),
-    });
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(
-        new CustomEvent("auth:token-refreshed", {
-          detail: { accessToken: newAccessToken },
-        }),
-      );
-    }
-    return newAccessToken;
+    if (!newAccessToken) return { status: "unavailable" };
+    persistAccessToken(newAccessToken);
+    return { status: "ok", accessToken: newAccessToken };
   } catch (error) {
-    const status =
-      axios.isAxiosError(error) ? error.response?.status : undefined;
-    // Network failures must not sign the user out — offline tracking needs the session.
-    if (status === 401 || status === 403) {
-      localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
-      localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
-      localStorage.removeItem(STORAGE_KEYS.SESSION_TOKEN);
-      clearPersistedAuthSession();
+    const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+    // Only wipe the session when the refresh token itself is rejected.
+    // Network / backend-down must not log the user out.
+    if (isAuthFailureStatus(status)) {
+      clearPersistedTokens();
+      emitSessionInvalid();
+      return { status: "invalid" };
     }
-    return null;
+    return { status: "unavailable" };
   }
+}
+
+function refreshOnce(): Promise<RefreshResult> {
+  if (!refreshPromise) {
+    refreshPromise = performRefresh().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
+
+function accessTokenExpiresSoon(token: string, skewMs = 30_000): boolean {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))) as {
+      exp?: number;
+    };
+    return typeof payload.exp !== "number" || payload.exp * 1000 - Date.now() < skewMs;
+  } catch {
+    return true;
+  }
+}
+
+export async function refreshAccessToken(): Promise<string | null> {
+  const result = await refreshOnce();
+  return result.status === "ok" ? result.accessToken : null;
+}
+
+/**
+ * A usable access token, refreshing first when the stored one is missing or
+ * about to expire. The realtime socket calls this on every (re)connect so it
+ * never presents a stale token. Returns null when signed out or unreachable.
+ */
+export async function getFreshAccessToken(): Promise<string | null> {
+  const current = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+  if (current && !accessTokenExpiresSoon(current)) return current;
+  const result = await refreshOnce();
+  return result.status === "ok" ? result.accessToken : null;
 }
 
 apiClient.interceptors.response.use(
@@ -113,27 +215,25 @@ apiClient.interceptors.response.use(
       error.response?.status !== 401 ||
       !originalRequest ||
       originalRequest._retry ||
-      originalRequest.url?.includes("/auth/refresh") ||
-      originalRequest.url?.includes("/auth/login")
+      isAuthRoute(originalRequest.url)
     ) {
       return Promise.reject(error);
     }
 
     originalRequest._retry = true;
 
-    if (!refreshPromise) {
-      refreshPromise = refreshAccessToken().finally(() => {
-        refreshPromise = null;
-      });
-    }
+    const refreshed = await refreshOnce();
 
-    const newAccessToken = await refreshPromise;
-
-    if (!newAccessToken) {
+    if (refreshed.status === "unavailable") {
+      // Keep the session; the caller sees the original error and can retry.
       return Promise.reject(error);
     }
 
-    originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+    if (refreshed.status === "invalid") {
+      return Promise.reject(error);
+    }
+
+    originalRequest.headers.Authorization = `Bearer ${refreshed.accessToken}`;
     return apiClient(originalRequest);
   },
 );

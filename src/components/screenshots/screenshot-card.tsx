@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { formatActivityPercent } from "@/lib/activity-percent";
+import { DARK_INK_INVERT } from "@/components/icons/figma-glyph";
 
 export type ScreenshotItem = {
   id: string;
@@ -34,12 +35,10 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
   const [imgFailed, setImgFailed] = useState(false);
 
   const activityLabel =
-    typeof item.activityPercent === "number"
-      ? formatActivityPercent(item.activityPercent)
-      : null;
+    typeof item.activityPercent === "number" ? formatActivityPercent(item.activityPercent) : null;
 
   return (
-    <div className="relative overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-white p-1">
+    <div className="relative overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-white p-1 dark:bg-card">
       <div
         role="button"
         tabIndex={0}
@@ -62,7 +61,7 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
           <img
             src={item.imageUrl}
             alt={item.appName || "Screenshot"}
-            className="size-full object-cover"
+            className="size-full bg-[var(--surface-elevated)] object-contain"
             referrerPolicy="no-referrer"
             onError={() => setImgFailed(true)}
           />
@@ -110,7 +109,7 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
             <Button
               variant="outline"
               size="sm"
-              className="h-8 border-red-400 bg-white text-xs text-red-500 hover:bg-red-50 hover:text-red-600"
+              className="h-8 border-red-400 bg-white text-xs text-red-500 hover:bg-red-50 hover:text-red-600 dark:border-red-500/60 dark:bg-card dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300"
               disabled={item.deleteRequested}
               onClick={() => {
                 if (item.deleteRequested) return;
@@ -142,14 +141,17 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
           <DropdownMenuTrigger asChild>
             <button type="button" className="outline-none" aria-label="Screenshot menu">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/figma/icon-more.svg" alt="" className="size-4" width={16} height={16} />
+              <img
+                src="/figma/icon-more.svg"
+                alt=""
+                className={`size-4 ${DARK_INK_INVERT}`}
+                width={16}
+                height={16}
+              />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              disabled={item.deleteRequested}
-              onClick={() => setShowDelete(true)}
-            >
+            <DropdownMenuItem disabled={item.deleteRequested} onClick={() => setShowDelete(true)}>
               {item.deleteRequested ? "Deletion pending" : "Request to delete"}
             </DropdownMenuItem>
             {item.imageUrl ? (

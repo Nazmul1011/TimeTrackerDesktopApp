@@ -6,27 +6,37 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useOrgTimezone } from "@/hooks/useOrgTimezone";
 import { formatElapsed } from "@/lib/dayjs";
-import { dispatchTimerStopped, TIMER_STOPPED_EVENT } from "@/lib/timer-events";
+import { isNetworkError } from "@/lib/network";
+import { TIMER_STOPPED_EVENT, dispatchTimerStopped } from "@/lib/timer-events";
+import {
+  pauseTimer,
+  resetDayTimer,
+  resumeTimer,
+  runTimerMutation,
+  selectProject,
+  stopTimer,
+} from "@/lib/timer-actions";
 import { timerApi } from "@/services/api/timer.api";
 import { timesheetApi } from "@/services/api/timesheet.api";
-import { sanitizeProjectId } from "@/lib/project";
-import { isNetworkError, isOfflineNow } from "@/lib/network";
 import {
+  canQueueOffline,
   enqueueTimerEvent,
   persistLocalTimer,
+  shouldQueueTimerEvent,
 } from "@/services/timer/offline-persist";
-import {
-  cancelWindowReveal,
-  scheduleWindowRevealAfterResume,
-} from "@/lib/window-reveal";
+import { sanitizeProjectId } from "@/lib/project";
+import { cancelWindowReveal } from "@/lib/window-reveal";
 import { useAuthStore } from "@/store/auth.store";
 import { useTimerStore } from "@/store/timer.store";
 
+/** Fallback only: realtime events push timer changes as they happen. */
+const TIMER_POLL_MS = 30_000;
+
 function getErrorMessage(err: unknown, fallback: string): string {
   if (typeof err === "object" && err !== null && "response" in err) {
-    const response = (err as { response?: { data?: { message?: string } } })
-      .response;
+    const response = (err as { response?: { data?: { message?: string } } }).response;
     if (response?.data?.message) return response.data.message;
   }
   if (err instanceof Error && err.message) return err.message;
@@ -37,8 +47,11 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
   const hydrateOnMount = options?.hydrateOnMount ?? false;
   const organizationId = useAuthStore((s) => s.organizationId);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  // Arrives with the org list, after the first render on a cold start.
+  const orgTimezone = useOrgTimezone();
 
   const timer = useTimerStore((s) => s.timer);
+  const selectedProjectId = useTimerStore((s) => s.selectedProjectId);
   const todayLoggedMs = useTimerStore((s) => s.todayLoggedMs);
   const isSyncing = useTimerStore((s) => s.isSyncing);
   const tick = useTimerStore((s) => s.tick);
@@ -48,41 +61,56 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
   const setTodayLoggedSeconds = useTimerStore((s) => s.setTodayLoggedSeconds);
   const ensureToday = useTimerStore((s) => s.ensureToday);
   const getDisplayMs = useTimerStore((s) => s.getDisplayMs);
-  const setSyncing = useTimerStore((s) => s.setSyncing);
   const setProject = useTimerStore((s) => s.setProject);
   const setDescription = useTimerStore((s) => s.setDescription);
   const reset = useTimerStore((s) => s.reset);
   const applyLocalStart = useTimerStore((s) => s.applyLocalStart);
-  const applyLocalPause = useTimerStore((s) => s.applyLocalPause);
-  const applyLocalResume = useTimerStore((s) => s.applyLocalResume);
 
-  const busyRef = useRef(false);
   const missingTimerStreakRef = useRef(0);
+  // False until today's total has loaded once; the poll below retries while false
+  // so a failed load (offline at boot/wake) can't leave the clock at 00:00:00.
+  const todayTotalLoadedRef = useRef(false);
   const [, forceRender] = useState(0);
 
   const refreshTodayTotal = useCallback(async () => {
     if (!isAuthenticated || !organizationId) return;
     if (useTimerStore.getState().isOfflineSession) return;
+    const requestedOrg = organizationId;
     try {
-      const seconds = await timesheetApi.getTodayLoggedSeconds();
+      const seconds = await timesheetApi.getTodayLoggedSeconds(orgTimezone);
+      // A total for the org we just left must not land on the new one.
+      if (useAuthStore.getState().organizationId !== requestedOrg) return;
       if (useTimerStore.getState().isOfflineSession) return;
       setTodayLoggedSeconds(seconds);
+      todayTotalLoadedRef.current = true;
     } catch {
-      // keep previous total
+      // keep previous total; the poll retries
+      todayTotalLoadedRef.current = false;
     }
-  }, [isAuthenticated, organizationId, setTodayLoggedSeconds]);
+  }, [isAuthenticated, organizationId, orgTimezone, setTodayLoggedSeconds]);
 
   const refreshCurrent = useCallback(async () => {
     if (!isAuthenticated || !organizationId) return;
-    if (useTimerStore.getState().isOfflineSession) return;
+    const requestedOrg = organizationId;
     try {
       const current = await timerApi.current();
-      if (useTimerStore.getState().isOfflineSession) return;
+      if (useAuthStore.getState().organizationId !== requestedOrg) return;
       hydrateFromApi(current);
     } catch {
       // keep local state if sync fails
     }
   }, [hydrateFromApi, isAuthenticated, organizationId]);
+
+  // Timer session and today's total belong to a single org. Clear them on a
+  // switch so the refresh below re-hydrates from the new org instead of
+  // leaving the previous org's clock running.
+  const loadedOrgRef = useRef(organizationId);
+  useEffect(() => {
+    if (loadedOrgRef.current === organizationId) return;
+    loadedOrgRef.current = organizationId;
+    todayTotalLoadedRef.current = false;
+    reset();
+  }, [organizationId, reset]);
 
   useEffect(() => {
     if (!isAuthenticated || !organizationId) return;
@@ -96,20 +124,20 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
     void refreshTodayTotal();
   }, [hydrateOnMount, refreshCurrent, refreshTodayTotal]);
 
-
   useEffect(() => {
     if (!isAuthenticated || !organizationId) return;
     missingTimerStreakRef.current = 0;
+    const requestedOrg = organizationId;
     const id = window.setInterval(async () => {
+      if (useTimerStore.getState().isOfflineSession) return;
+      if (!todayTotalLoadedRef.current) void refreshTodayTotal();
       try {
         const current = await timerApi.current();
+        if (useAuthStore.getState().organizationId !== requestedOrg) return;
+        if (useTimerStore.getState().isOfflineSession) return;
         const status = useTimerStore.getState().timer.status;
         if (!current) {
           if (status === "idle") {
-            missingTimerStreakRef.current = 0;
-            return;
-          }
-          if (useTimerStore.getState().isOfflineSession) {
             missingTimerStreakRef.current = 0;
             return;
           }
@@ -118,6 +146,9 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
           missingTimerStreakRef.current += 1;
           if (missingTimerStreakRef.current >= 2) {
             setIdle();
+            // Stopped on the server (auto-stop while asleep/offline): the
+            // session is now a saved entry, so reload today's total.
+            dispatchTimerStopped();
           }
           return;
         }
@@ -128,14 +159,32 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
       } catch {
         // Network/401 must not stop a locally running timer (screenshots depend on it)
       }
-    }, 4000);
+    }, TIMER_POLL_MS);
     return () => window.clearInterval(id);
-  }, [hydrateFromApi, isAuthenticated, organizationId, setIdle]);
+  }, [hydrateFromApi, isAuthenticated, organizationId, refreshTodayTotal, setIdle]);
+
+  // Start / resume (button, tray, idle auto-resume, server hydrate)
+  useEffect(() => {
+    if (timer.status !== "running") return;
+    void refreshTodayTotal();
+  }, [timer.status, refreshTodayTotal]);
+
+  // Window shown again (from tray, after sleep)
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refreshTodayTotal();
+    };
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [refreshTodayTotal]);
 
   // Refresh today's total after any stop (local or remote)
   useEffect(() => {
     const onStopped = () => {
-      if (useTimerStore.getState().isOfflineSession) return;
       void refreshTodayTotal();
     };
     window.addEventListener(TIMER_STOPPED_EVENT, onStopped);
@@ -165,231 +214,81 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
 
   const start = useCallback(
     async (projectId?: string | null) => {
-      if (busyRef.current) return;
-      busyRef.current = true;
-      setSyncing(true);
-      try {
-        ensureToday();
-        const resolved =
-          projectId !== undefined ? projectId : timer.projectId;
-        setProject(resolved ?? null);
-        const occurredAt = new Date().toISOString();
-        const goOffline = async () => {
-          applyLocalStart({
-            projectId: resolved,
-            description: timer.description,
-            occurredAt,
-          });
-          await enqueueTimerEvent({
-            type: "start",
-            occurredAt,
-            projectId: sanitizeProjectId(resolved),
-            description: timer.description || undefined,
-          });
-          cancelWindowReveal();
-          toast.message(
-            "Timer started offline — will sync when you are back online",
-          );
-        };
-        if (isOfflineNow()) {
-          await goOffline();
-          return;
-        }
+      await runTimerMutation(async () => {
         try {
-          const apiTimer = await timerApi.start({
-            projectId: sanitizeProjectId(resolved),
-            description: timer.description || undefined,
-            occurredAt,
-          });
-          hydrateFromApi(apiTimer);
-          persistLocalTimer();
-          cancelWindowReveal();
-        } catch (err) {
-          if (isNetworkError(err)) {
-            await goOffline();
+          ensureToday();
+          // Default to whatever the picker shows, not the last session's project.
+          const resolved = projectId !== undefined ? projectId : selectedProjectId;
+          // Keep picker in sync (e.g. timesheet Play / General)
+          setProject(resolved ?? null);
+          const occurredAt = new Date().toISOString();
+          const startOffline = async () => {
+            applyLocalStart({ projectId: resolved, description: timer.description, occurredAt });
+            await enqueueTimerEvent({
+              type: "start",
+              occurredAt,
+              projectId: sanitizeProjectId(resolved),
+              description: timer.description || undefined,
+            });
+            cancelWindowReveal();
+            toast.message("Timer started offline — will sync when you are back online");
+          };
+          if (shouldQueueTimerEvent()) {
+            await startOffline();
             return;
           }
+          try {
+            const apiTimer = await timerApi.start({
+              projectId: sanitizeProjectId(resolved),
+              description: timer.description || undefined,
+              occurredAt,
+            });
+            hydrateFromApi(apiTimer);
+            persistLocalTimer();
+            cancelWindowReveal();
+          } catch (err) {
+            if (canQueueOffline() && isNetworkError(err)) {
+              await startOffline();
+              return;
+            }
+            throw err;
+          }
+        } catch (err) {
           toast.error(getErrorMessage(err, "Failed to start timer"));
         }
-      } finally {
-        setSyncing(false);
-        busyRef.current = false;
-      }
+      });
     },
     [
       applyLocalStart,
       ensureToday,
       hydrateFromApi,
+      selectedProjectId,
       setProject,
-      setSyncing,
       timer.description,
-      timer.projectId,
     ],
   );
 
   const pause = useCallback(async () => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setSyncing(true);
-    const occurredAt = new Date().toISOString();
-    try {
-      if (isOfflineNow()) {
-        applyLocalPause();
-        await enqueueTimerEvent({ type: "pause", occurredAt });
-        cancelWindowReveal();
-        toast.message("Paused offline — will sync when you are back online");
-        return;
-      }
-      const apiTimer = await timerApi.pause({ occurredAt });
-      hydrateFromApi(apiTimer);
-      persistLocalTimer();
-      cancelWindowReveal();
-    } catch (err) {
-      if (isNetworkError(err)) {
-        applyLocalPause();
-        await enqueueTimerEvent({ type: "pause", occurredAt });
-        cancelWindowReveal();
-        toast.message("Paused offline — will sync when you are back online");
-        return;
-      }
-      toast.error(getErrorMessage(err, "Failed to pause timer"));
-    } finally {
-      setSyncing(false);
-      busyRef.current = false;
-    }
-  }, [applyLocalPause, hydrateFromApi, setSyncing]);
+    await pauseTimer();
+  }, []);
 
   const resume = useCallback(async () => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setSyncing(true);
-    const occurredAt = new Date().toISOString();
-    try {
-      if (isOfflineNow()) {
-        applyLocalResume();
-        await enqueueTimerEvent({ type: "resume", occurredAt });
-        scheduleWindowRevealAfterResume();
-        toast.message("Resumed offline — will sync when you are back online");
-        return;
-      }
-      const apiTimer = await timerApi.resume({ occurredAt });
-      hydrateFromApi(apiTimer);
-      persistLocalTimer();
-      scheduleWindowRevealAfterResume();
-    } catch (err) {
-      if (isNetworkError(err)) {
-        applyLocalResume();
-        await enqueueTimerEvent({ type: "resume", occurredAt });
-        scheduleWindowRevealAfterResume();
-        toast.message("Resumed offline — will sync when you are back online");
-        return;
-      }
-      toast.error(getErrorMessage(err, "Failed to resume timer"));
-    } finally {
-      setSyncing(false);
-      busyRef.current = false;
-    }
-  }, [applyLocalResume, hydrateFromApi, setSyncing]);
+    await resumeTimer();
+  }, []);
 
   const stop = useCallback(async () => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setSyncing(true);
-    const occurredAt = new Date().toISOString();
-    const finishLocalStop = async () => {
-      const sessionSeconds = Math.max(
-        0,
-        Math.round(
-          (getDisplayMs() - useTimerStore.getState().todayLoggedMs) / 1000,
-        ),
-      );
-      await enqueueTimerEvent({
-        type: "stop",
-        occurredAt,
-        description: timer.description || undefined,
-      });
-      const previousLogged = useTimerStore.getState().todayLoggedMs;
-      setIdle();
-      useTimerStore.getState().setOfflineSession(true);
-      if (sessionSeconds > 0) {
-        setTodayLoggedSeconds(previousLogged / 1000 + sessionSeconds);
-      }
-      persistLocalTimer();
-      cancelWindowReveal();
-      if (sessionSeconds > 0) {
-        dispatchTimerStopped({
-          totalDurationSeconds: sessionSeconds,
-          entryCount: 1,
-        });
-        toast.success(
-          `Saved ${formatElapsed(sessionSeconds * 1000)} locally — will sync online`,
-        );
-      } else {
-        toast.success("Timer stopped offline — will sync when you are back online");
-      }
-    };
-    try {
-      if (isOfflineNow()) {
-        await finishLocalStop();
-        return;
-      }
-      const sessionSeconds = Math.max(
-        0,
-        Math.round((getDisplayMs() - useTimerStore.getState().todayLoggedMs) / 1000),
-      );
-      const result = await timerApi.stop({
-        description: timer.description || undefined,
-        occurredAt,
-      });
-      const rows = result?.entries ?? [];
-      const fromEntries = rows.reduce(
-        (sum, entry) => sum + (entry.duration ?? 0),
-        0,
-      );
-      const savedSeconds =
-        result?.totalDurationSeconds || fromEntries || sessionSeconds;
-      const previousLogged = useTimerStore.getState().todayLoggedMs;
-      setIdle();
-      persistLocalTimer();
-      cancelWindowReveal();
-      if (savedSeconds > 0) {
-        setTodayLoggedSeconds(previousLogged / 1000 + savedSeconds);
-      }
-      dispatchTimerStopped({
-        totalDurationSeconds: savedSeconds,
-        entryCount: result?.count ?? rows.length,
-      });
-      await refreshTodayTotal();
-      if (savedSeconds > 0) {
-        toast.success(`Saved ${formatElapsed(savedSeconds * 1000)} to timesheet`);
-      } else {
-        toast.success("Timer stopped");
-      }
-    } catch (err) {
-      if (isNetworkError(err)) {
-        await finishLocalStop();
-        return;
-      }
-      toast.error(getErrorMessage(err, "Failed to stop timer"));
-      await refreshCurrent();
-    } finally {
-      setSyncing(false);
-      busyRef.current = false;
-    }
-  }, [
-    getDisplayMs,
-    refreshCurrent,
-    refreshTodayTotal,
-    setIdle,
-    setSyncing,
-    setTodayLoggedSeconds,
-    timer.description,
-  ]);
+    await stopTimer();
+  }, []);
+
+  const resetDay = useCallback(async () => {
+    return await resetDayTimer();
+  }, []);
 
   const displayMs = getDisplayMs();
 
   return {
     timer,
+    selectedProjectId,
     display: formatElapsed(displayMs),
     displayMs,
     todayLoggedMs,
@@ -401,6 +300,8 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
     stop,
     pause,
     resume,
+    resetDay,
+    selectProject,
     setProject,
     setDescription,
     reset,

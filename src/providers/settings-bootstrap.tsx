@@ -1,14 +1,10 @@
 /**
  * Bootstraps preferences from Electron / local store.
- * Theme switching is deferred (Coming soon) — app stays light.
  */
 "use client";
 
 import { useEffect } from "react";
-import {
-  hydrateSettingsFromElectron,
-  useSettingsStore,
-} from "@/store/settings.store";
+import { hydrateSettingsFromElectron, useSettingsStore } from "@/store/settings.store";
 
 function mergeSettings(
   local: ReturnType<typeof useSettingsStore.getState>["settings"],
@@ -17,7 +13,6 @@ function mergeSettings(
   return {
     ...local,
     ...remote,
-    theme: "light" as const,
   };
 }
 

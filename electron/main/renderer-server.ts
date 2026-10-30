@@ -31,9 +31,7 @@ let rendererOrigin: string | null = null;
 function getStaticRoot(): string {
   // Packaged: files live next to package.json inside app.asar / app folder
   // Dev fallback (unused when not packaged): project root `out/`
-  return app.isPackaged
-    ? path.join(app.getAppPath(), "out")
-    : path.join(app.getAppPath(), "out");
+  return app.isPackaged ? path.join(app.getAppPath(), "out") : path.join(app.getAppPath(), "out");
 }
 
 function resolveFile(root: string, urlPath: string): string | null {
@@ -86,7 +84,15 @@ export async function startRendererServer(): Promise<string> {
     }
 
     const ext = path.extname(file).toLowerCase();
-    res.writeHead(200, { "Content-Type": MIME[ext] || "application/octet-stream" });
+    res.writeHead(200, {
+      "Content-Type": MIME[ext] || "application/octet-stream",
+      // next/font preloads with crossorigin=""; Chromium requires ACAO even on 127.0.0.1
+      "Access-Control-Allow-Origin": "*",
+      "Cross-Origin-Resource-Policy": "cross-origin",
+      ...(ext === ".woff" || ext === ".woff2"
+        ? { "Cache-Control": "public, max-age=31536000, immutable" }
+        : {}),
+    });
     fs.createReadStream(file).pipe(res);
   });
 
@@ -94,9 +100,7 @@ export async function startRendererServer(): Promise<string> {
     const tryListen = (port: number) => {
       const onError = (err: NodeJS.ErrnoException) => {
         if (port !== 0 && err.code === "EADDRINUSE") {
-          log.warn(
-            `[renderer-server] port ${port} in use, falling back to a random port`,
-          );
+          log.warn(`[renderer-server] port ${port} in use, falling back to a random port`);
           tryListen(0);
           return;
         }

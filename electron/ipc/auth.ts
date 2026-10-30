@@ -1,12 +1,9 @@
 /**
- * Auth IPC — persist session in electron-store so login survives restarts.
+ * Auth IPC — persist session in electron-store so Quit keeps the user signed in.
  */
 import { ipcMain } from "electron";
 import log from "electron-log/main";
-import {
-  StorageService,
-  type PersistedAuthSession,
-} from "../services/storage";
+import { StorageService, type PersistedAuthSession } from "../services/storage";
 
 function isSessionPayload(value: unknown): value is PersistedAuthSession {
   return Boolean(value) && typeof value === "object";
@@ -16,29 +13,35 @@ export function registerAuthIpc(): void {
   ipcMain.handle("auth:login", async () => {
     return { ok: false, message: "Use renderer login" };
   });
+
   ipcMain.handle("auth:getSession", async () => {
     const session = StorageService.getInstance().getAuthSession();
-    const hasSession = Boolean(session.refreshToken || session.accessToken);
-    log.info("[ipc:auth] getSession", { hasSession });
-    return hasSession ? session : null;
+    log.info(
+      `[ipc:auth] getSession → ${session?.accessToken || session?.refreshToken ? "found" : "empty"}`,
+    );
+    return session;
   });
 
   ipcMain.handle("auth:saveSession", async (_event, payload: unknown) => {
     if (!isSessionPayload(payload)) {
       return { ok: false, message: "Invalid session payload" };
     }
-    StorageService.getInstance().setAuthSession(payload);
-    log.info("[ipc:auth] saveSession", {
-      hasAccessToken: Boolean(payload.accessToken),
-      hasRefreshToken: Boolean(payload.refreshToken),
-      hasOrg: Boolean(payload.organizationId),
+    StorageService.getInstance().setAuthSession({
+      accessToken: payload.accessToken ?? null,
+      refreshToken: payload.refreshToken ?? null,
+      sessionToken: payload.sessionToken ?? null,
+      organizationId: payload.organizationId ?? null,
+      user: payload.user ?? null,
+      organizations: Array.isArray(payload.organizations) ? payload.organizations : null,
+      // Token-refresh saves don't carry it; a fallback port would otherwise lose it.
+      deviceId: payload.deviceId ?? StorageService.getInstance().getAuthSession()?.deviceId ?? null,
     });
     return { ok: true };
   });
 
   ipcMain.handle("auth:logout", async () => {
     StorageService.getInstance().clearAuthSession();
-    log.info("[ipc:auth] logout — persisted session cleared");
+    log.info("[ipc:auth] logout — cleared persisted session");
     return { ok: true };
   });
 }

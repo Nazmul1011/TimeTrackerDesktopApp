@@ -2,10 +2,13 @@
  * BrowserWindow factory.
  * Creates the main application window with context isolation enabled.
  */
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, nativeImage, nativeTheme, shell } from "electron";
 import path from "path";
 import log from "electron-log/main";
-import { getRendererOrigin } from "./renderer-server";
+import { findExistingPath, resolveAppIconPaths } from "../utils";
+import { WindowRevealService } from "../services/window-reveal";
+import { startRendererServer } from "./renderer-server";
+import { windowBackgroundColor } from "./theme";
 
 async function waitForRenderer(url: string, attempts = 40): Promise<void> {
   for (let i = 0; i < attempts; i++) {
@@ -22,16 +25,25 @@ async function waitForRenderer(url: string, attempts = 40): Promise<void> {
 }
 
 export function createMainWindow(): BrowserWindow {
+  const iconPath = findExistingPath(resolveAppIconPaths());
+  const icon = iconPath ? nativeImage.createFromPath(iconPath) : undefined;
+
   const win = new BrowserWindow({
     width: 446,
     height: 640,
-    minWidth: 400,
-    minHeight: 520,
-    maxWidth: 520,
+    minWidth: 446,
+    minHeight: 640,
+    maxWidth: 446,
+    maxHeight: 640,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
     show: false,
     title: "Gr8r Time Tracker",
-    backgroundColor: "#f9fafb",
+    backgroundColor: windowBackgroundColor(),
     autoHideMenuBar: true,
+    // On macOS the window icon is flattened onto white and replaces dock.setIcon.
+    ...(process.platform !== "darwin" && icon && !icon.isEmpty() ? { icon } : {}),
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
@@ -50,8 +62,19 @@ export function createMainWindow(): BrowserWindow {
 
   win.once("ready-to-show", reveal);
 
+  // Theme setting changed, or the OS switched while on "System".
+  const onThemeUpdated = () => {
+    if (!win.isDestroyed()) win.setBackgroundColor(windowBackgroundColor());
+  };
+  nativeTheme.on("updated", onThemeUpdated);
+  win.on("closed", () => nativeTheme.removeListener("updated", onThemeUpdated));
+
   // Safety net — never leave a hidden window if ready-to-show never fires
   setTimeout(reveal, 4000);
+
+  win.on("minimize", () => {
+    WindowRevealService.getInstance().cancel();
+  });
 
   // Open external links in the system browser
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -60,17 +83,18 @@ export function createMainWindow(): BrowserWindow {
   });
 
   const isDev = !app.isPackaged;
-  const rendererUrl =
-    getRendererOrigin() ||
-    process.env.ELECTRON_RENDERER_URL ||
-    "http://localhost:3000";
-  const startUrl = `${rendererUrl.replace(/\/$/, "")}/home/`;
 
   void (async () => {
     try {
+      let startUrl: string;
       if (isDev) {
+        const rendererUrl = process.env.ELECTRON_RENDERER_URL || "http://localhost:3000";
+        startUrl = `${rendererUrl.replace(/\/$/, "")}/home`;
         log.info(`[window] Waiting for renderer: ${startUrl}`);
         await waitForRenderer(startUrl);
+      } else {
+        const origin = await startRendererServer();
+        startUrl = `${origin}/home/`;
       }
       log.info(`[window] Loading renderer: ${startUrl}`);
       await win.loadURL(startUrl);

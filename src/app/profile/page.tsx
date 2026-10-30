@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { RiArrowLeftSLine } from "react-icons/ri";
 import { ProfileCard } from "@/components/profile/profile-card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -26,8 +27,7 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const organization =
-    organizations.find((o) => o.id === organizationId) ?? organizations[0];
+  const organization = organizations.find((o) => o.id === organizationId) ?? organizations[0];
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -75,7 +75,8 @@ export default function ProfilePage() {
           className="h-8 px-2 text-xs"
           onClick={() => router.push(ROUTES.HOME)}
         >
-          ← Back
+          <RiArrowLeftSLine size={16} />
+          Back
         </Button>
         <h1 className="text-sm text-[var(--text-subtle)]">Profile</h1>
         <div className="w-12" />
@@ -95,12 +96,12 @@ export default function ProfilePage() {
           />
 
           <div className="surface-card w-full space-y-4 p-4">
-            <p className="text-sm font-medium text-[#1e2939]">Edit profile</p>
+            <p className="text-sm font-medium text-[#1e2939] dark:text-[#f1f5f9]">Edit profile</p>
 
             <div className="space-y-1">
               <Label className="text-xs">Full name</Label>
               <input
-                className="h-9 w-full rounded-lg border border-[#e6e6e6] px-3 text-xs text-[#1e2939] outline-none focus:border-[#2b7fff]"
+                className="h-9 w-full rounded-lg border border-[#e6e6e6] px-3 text-xs text-[#1e2939] outline-none focus:border-[#2b7fff] dark:border-[#334155] dark:text-[#f1f5f9]"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
@@ -109,7 +110,7 @@ export default function ProfilePage() {
             <div className="space-y-1">
               <Label className="text-xs">Phone</Label>
               <input
-                className="h-9 w-full rounded-lg border border-[#e6e6e6] px-3 text-xs text-[#1e2939] outline-none focus:border-[#2b7fff]"
+                className="h-9 w-full rounded-lg border border-[#e6e6e6] px-3 text-xs text-[#1e2939] outline-none focus:border-[#2b7fff] dark:border-[#334155] dark:text-[#f1f5f9]"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="Optional"
@@ -119,7 +120,7 @@ export default function ProfilePage() {
             <div className="space-y-1">
               <Label className="text-xs">Timezone</Label>
               <input
-                className="h-9 w-full rounded-lg border border-[#e6e6e6] px-3 text-xs text-[#1e2939] outline-none focus:border-[#2b7fff]"
+                className="h-9 w-full rounded-lg border border-[#e6e6e6] px-3 text-xs text-[#1e2939] outline-none focus:border-[#2b7fff] dark:border-[#334155] dark:text-[#f1f5f9]"
                 value={timezone}
                 onChange={(e) => setTimezone(e.target.value)}
               />

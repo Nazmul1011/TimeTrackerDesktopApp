@@ -2,7 +2,7 @@
  * Main-process tracking loop — screenshots while the timer is running.
  * Capture lives in Electron main so it continues if the renderer is throttled.
  */
-import { BrowserWindow } from "electron";
+import { app, BrowserWindow } from "electron";
 import fs from "fs";
 import path from "path";
 import log from "electron-log/main";
@@ -11,8 +11,11 @@ import { screenshotFilename } from "../screenshots/compress";
 import { OfflineQueue } from "../offline/queue";
 import { ActivityService } from "../activity";
 import { InputActivityMonitor } from "../input-activity";
+import { IdleService } from "../idle";
 import { NotificationService } from "../notifications";
 import { WindowRevealService } from "../window-reveal";
+import { MacPermissions } from "../mac-permissions";
+import { getMainApiBaseUrl } from "../../api-url";
 
 export type TrackingAuth = {
   accessToken: string;
@@ -31,8 +34,20 @@ export type TrackingOptions = {
   idleTimeoutMs?: number;
 };
 
+/**
+ * How often the main process tells the server the timer's machine is alive.
+ * The server auto-stops a running timer after 5 minutes of silence, so this
+ * must keep firing even when the window is hidden and the renderer throttled.
+ */
+const HEARTBEAT_MS = 60_000;
+const REFRESH_TIMEOUT_MS = 8_000;
+const HEARTBEAT_TIMEOUT_MS = 15_000;
+
 export class TrackingService {
   private static instance: TrackingService | null = null;
+
+  private heartbeatTimer: NodeJS.Timeout | null = null;
+  private heartbeatInFlight = false;
 
   private running = false;
   private auth: TrackingAuth | null = null;
@@ -40,7 +55,7 @@ export class TrackingService {
     screenshotIntervalMs: 5 * 60_000,
     enableScreenshots: true,
     firstScreenshotDelayMs: 3_000,
-    idleTimeoutMs: 3 * 60_000,
+    idleTimeoutMs: 2 * 60_000,
   };
   private screenshotTimer: NodeJS.Timeout | null = null;
   private firstShotTimer: NodeJS.Timeout | null = null;
@@ -48,7 +63,10 @@ export class TrackingService {
   private capturing = false;
   private authWaiters: Array<(ok: boolean) => void> = [];
   private idlePauseInFlight = false;
-  private scheduleRevealOnNextStart = false;
+  /** After idle auto-pause, wait for mouse/keyboard then resume (not manual Pause). */
+  private awaitingIdleResume = false;
+  private idleResumeTimer: NodeJS.Timeout | null = null;
+  private lastIdleResumeEmitAt = 0;
   private lastCaptureAt = 0;
 
   static getInstance(): TrackingService {
@@ -77,7 +95,7 @@ export class TrackingService {
       organizationId: "",
       deviceId: "desktop",
       sessionToken: null,
-      apiBaseUrl: "http://localhost:3001",
+      apiBaseUrl: getMainApiBaseUrl(),
     };
 
     if (auth.accessToken) next.accessToken = auth.accessToken;
@@ -96,6 +114,12 @@ export class TrackingService {
   }
 
   start(auth: TrackingAuth, options?: Partial<TrackingOptions>) {
+    if (this.awaitingIdleResume) {
+      log.info("[TrackingService] start ignored — waiting for idle auto-resume");
+      this.updateAuth(auth);
+      return { ok: true, intervalMs: this.options.screenshotIntervalMs };
+    }
+
     if (this.stopTimer) {
       clearTimeout(this.stopTimer);
       this.stopTimer = null;
@@ -103,6 +127,8 @@ export class TrackingService {
 
     this.stopTimersOnly();
     this.updateAuth(auth);
+    MacPermissions.clearCaptureBlock();
+    ScreenshotService.getInstance().resetWarnings();
     this.options = {
       screenshotIntervalMs: Math.max(60_000, options?.screenshotIntervalMs ?? 5 * 60_000),
       enableScreenshots: options?.enableScreenshots !== false,
@@ -110,10 +136,12 @@ export class TrackingService {
       idleTimeoutMs:
         typeof options?.idleTimeoutMs === "number"
           ? Math.max(0, options.idleTimeoutMs)
-          : 3 * 60_000,
+          : 1 * 60_000,
     };
     this.running = true;
     this.idlePauseInFlight = false;
+    this.disarmIdleResume();
+    this.startHeartbeat();
 
     ActivityService.getInstance().start();
     const idleMs = this.options.idleTimeoutMs ?? 0;
@@ -127,32 +155,34 @@ export class TrackingService {
     );
 
     if (this.options.enableScreenshots) {
-      this.firstShotTimer = setTimeout(() => {
-        void this.captureAndUpload();
-      }, this.options.firstScreenshotDelayMs);
-
-      this.screenshotTimer = setInterval(() => {
-        void this.captureAndUpload();
-      }, this.options.screenshotIntervalMs);
+      void this.startScreenshotLoopWhenAllowed();
     }
 
     log.info(
       `[TrackingService] started — screenshots every ${Math.round(this.options.screenshotIntervalMs / 1000)}s`,
     );
 
-    if (this.scheduleRevealOnNextStart) {
-      this.scheduleRevealOnNextStart = false;
-      const revealMs = Math.max(60_000, this.options.idleTimeoutMs ?? 5 * 60_000);
-      WindowRevealService.getInstance().scheduleAfterResume(revealMs);
-      log.info(
-        `[TrackingService] window reveal scheduled after idle resume (${Math.round(revealMs / 1000)}s)`,
-      );
-    }
-
     return { ok: true, intervalMs: this.options.screenshotIntervalMs };
   }
 
+  retryScreenshots() {
+    MacPermissions.clearCaptureBlock();
+    ScreenshotService.getInstance().resetWarnings();
+    if (!this.running || !this.options.enableScreenshots) {
+      return { ok: false, message: "Start the timer first" };
+    }
+    this.stopTimersOnly();
+    void this.startScreenshotLoopWhenAllowed();
+    log.info("[TrackingService] screenshot capture retried");
+    return { ok: true };
+  }
+
   stop() {
+    if (this.awaitingIdleResume) {
+      log.info("[TrackingService] stop ignored — waiting for idle auto-resume");
+      return { ok: true };
+    }
+
     if (this.stopTimer) {
       clearTimeout(this.stopTimer);
     }
@@ -162,14 +192,57 @@ export class TrackingService {
       this.stopTimer = null;
       this.running = false;
       this.stopTimersOnly();
+      this.stopHeartbeat();
       InputActivityMonitor.getInstance().stop();
       ActivityService.getInstance().stop();
+      if (this.awaitingIdleResume) {
+        this.startIdleResumeWatch();
+      } else {
+        this.clearIdleResumeWatch();
+      }
       log.info("[TrackingService] stopped");
     }, 2000);
     return { ok: true };
   }
 
+  private screenshotLoopGen = 0;
+
+  private async startScreenshotLoopWhenAllowed(): Promise<void> {
+    const gen = this.screenshotLoopGen;
+    if (process.platform === "darwin") {
+      const ok = await MacPermissions.requestScreenRecordingOnce();
+      if (!ok) {
+        log.warn(
+          "[TrackingService] Screen Recording not granted — screenshots paused until you enable Gr8r Time Tracker in System Settings and fully quit the app",
+        );
+        this.emitToRenderer("screenshot:failed", {
+          message: "Screen Recording not granted",
+        });
+        return;
+      }
+    }
+    if (gen !== this.screenshotLoopGen || !this.running || !this.options.enableScreenshots) {
+      return;
+    }
+    this.firstShotTimer = setTimeout(() => {
+      void this.captureAndUpload().then((result) => {
+        if (
+          !result.ok ||
+          gen !== this.screenshotLoopGen ||
+          !this.running ||
+          !this.options.enableScreenshots
+        ) {
+          return;
+        }
+        this.screenshotTimer = setInterval(() => {
+          void this.captureAndUpload();
+        }, this.options.screenshotIntervalMs);
+      });
+    }, this.options.firstScreenshotDelayMs);
+  }
+
   private stopTimersOnly() {
+    this.screenshotLoopGen += 1;
     if (this.screenshotTimer) {
       clearInterval(this.screenshotTimer);
       this.screenshotTimer = null;
@@ -197,11 +270,21 @@ export class TrackingService {
     this.capturing = true;
     try {
       let shot = await ScreenshotService.getInstance().capture();
-      if (!shot?.buffer?.length) {
+      if (!shot?.buffer?.length && process.platform !== "darwin") {
         await new Promise((resolve) => setTimeout(resolve, 1500));
         shot = await ScreenshotService.getInstance().capture();
       }
       if (!shot?.buffer?.length) {
+        if (process.platform === "darwin") {
+          MacPermissions.markCaptureFailed();
+          this.stopTimersOnly();
+          const message = "Screen Recording not granted";
+          log.warn(
+            "[TrackingService] capture failed — screenshots paused until Screen Recording is on and the app is fully quit",
+          );
+          this.emitToRenderer("screenshot:failed", { message });
+          return { ok: false, message };
+        }
         const message = "Screenshot capture failed";
         log.warn(`[TrackingService] ${message}`);
         this.emitToRenderer("screenshot:failed", { message });
@@ -210,12 +293,11 @@ export class TrackingService {
 
       const win = await ActivityService.getInstance().getActiveWindow();
       const activityPercent = InputActivityMonitor.getInstance().consumePercent();
-      log.info(`[TrackingService] uploading screenshot ${shot.buffer.length}B ${shot.mimeType}`);
       const uploaded = await this.uploadBuffer(shot.buffer, {
         timestamp: shot.capturedAt,
         appName: win.appName || "Desktop",
         windowTitle: win.windowTitle || "",
-        mimeType: shot.mimeType || "image/jpeg",
+        mimeType: shot.mimeType ?? "image/jpeg",
         activityPercent,
       });
 
@@ -398,7 +480,7 @@ export class TrackingService {
       mimeType: string;
       activityPercent: number;
     },
-  ): { body: Uint8Array; contentType: string } {
+  ): { body: Buffer<ArrayBuffer>; contentType: string } {
     const boundary = `----Gr8rScreenshot${Date.now()}${process.pid}`;
     const chunks: Buffer[] = [];
     const pushField = (name: string, value: string) => {
@@ -441,6 +523,7 @@ export class TrackingService {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ refreshToken: this.auth.refreshToken }),
+          signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
         });
         const json = (await response.json().catch(() => null)) as {
           success?: boolean;
@@ -483,6 +566,12 @@ export class TrackingService {
     this.idlePauseInFlight = true;
     this.stopTimersOnly();
 
+    // The monitor fires after a full idle window of no input, so the idle
+    // stretch began that long ago. Capture it before the awaits below so the
+    // renderer can pause the timer as of then instead of as of "now".
+    const idleMs = this.options.idleTimeoutMs ?? this.options.screenshotIntervalMs;
+    const idleSince = new Date(Date.now() - idleMs).toISOString();
+
     log.info(`[TrackingService] idle for one screenshot interval — pausing timer`);
 
     if (this.options.enableScreenshots) {
@@ -495,24 +584,112 @@ export class TrackingService {
       }
     }
 
-    const idleMs = this.options.idleTimeoutMs ?? this.options.screenshotIntervalMs;
-    const idleMinutes = Math.max(1, Math.round(idleMs / 60_000));
+    NotificationService.getInstance().showTimerIdlePaused(idleMs);
 
-    const notifyResult = NotificationService.getInstance().showTimerIdlePaused(idleMinutes);
-    if (!notifyResult.ok) {
-      log.warn("[TrackingService] idle notification failed", notifyResult.message);
-    }
-
-    this.scheduleRevealOnNextStart = true;
+    this.running = false;
+    // The timer is about to be paused; a paused timer is never auto-stopped.
+    this.stopHeartbeat();
+    this.awaitingIdleResume = true;
+    InputActivityMonitor.getInstance().stop();
+    ActivityService.getInstance().stop();
+    this.startIdleResumeWatch();
 
     this.emitToRenderer("tracking:idle-timeout", {
       intervalMs: idleMs,
+      idleSince,
       activityPercent: InputActivityMonitor.getInstance().peekPercent(),
     });
+  }
 
-    this.running = false;
-    InputActivityMonitor.getInstance().stop();
-    ActivityService.getInstance().stop();
+  /** Cancel auto-resume (Stop, logout, or a manual Pause that was never idle). */
+  disarmIdleResume() {
+    this.awaitingIdleResume = false;
+    this.lastIdleResumeEmitAt = 0;
+    this.clearIdleResumeWatch();
+  }
+
+  private startIdleResumeWatch() {
+    this.clearIdleResumeWatch();
+    IdleService.getInstance().startWatching();
+    // Capture after startWatching so the seed lastInputAt is not treated as the user coming back.
+    const baseline = Date.now();
+    this.idleResumeTimer = setInterval(() => {
+      if (!this.awaitingIdleResume) return;
+      if (!IdleService.getInstance().inputOccurredAfter(baseline)) return;
+      this.fireIdleResume();
+    }, 250);
+    log.info("[TrackingService] watching for mouse/keyboard to auto-resume after idle pause");
+  }
+
+  private fireIdleResume() {
+    if (!this.awaitingIdleResume) return;
+    this.awaitingIdleResume = false;
+    this.clearIdleResumeWatch();
+    this.lastIdleResumeEmitAt = Date.now();
+    log.info("[TrackingService] input after idle pause — requesting timer resume");
+    NotificationService.getInstance().showTimerIdleResumed();
+    this.emitToRenderer("tracking:idle-resume", {
+      resumedAt: new Date().toISOString(),
+    });
+  }
+
+  private clearIdleResumeWatch() {
+    if (this.idleResumeTimer) {
+      clearInterval(this.idleResumeTimer);
+      this.idleResumeTimer = null;
+      // While tracking, the activity monitor owns the watcher. Otherwise this
+      // watch was its only user, so don't leave the xinput process running.
+      if (!this.running) IdleService.getInstance().stopWatching();
+    }
+  }
+
+  private startHeartbeat() {
+    this.stopHeartbeat();
+    void this.sendHeartbeat();
+    this.heartbeatTimer = setInterval(() => {
+      void this.sendHeartbeat();
+    }, HEARTBEAT_MS);
+  }
+
+  private stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  /** Failures only log: one missed beat is fine, the server allows five. */
+  private async sendHeartbeat(): Promise<void> {
+    if (this.heartbeatInFlight) return;
+    if (!this.auth?.accessToken || !this.auth.organizationId) return;
+    this.heartbeatInFlight = true;
+    try {
+      const post = () =>
+        fetch(`${this.auth!.apiBaseUrl.replace(/\/$/, "")}/activity/heartbeat`, {
+          method: "POST",
+          headers: {
+            ...this.buildAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            deviceId: this.auth!.deviceId,
+            version: app.getVersion(),
+          }),
+          signal: AbortSignal.timeout(HEARTBEAT_TIMEOUT_MS),
+        });
+
+      let response = await post();
+      if (response.status === 401 && (await this.refreshAccessToken())) {
+        response = await post();
+      }
+      if (!response.ok) {
+        log.warn(`[TrackingService] heartbeat rejected: ${response.status}`);
+      }
+    } catch (error) {
+      log.warn("[TrackingService] heartbeat failed", error);
+    } finally {
+      this.heartbeatInFlight = false;
+    }
   }
 
   private emitToRenderer(channel: string, payload: unknown) {

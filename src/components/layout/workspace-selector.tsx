@@ -9,11 +9,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { toast } from "sonner";
+import { DARK_INK_INVERT } from "@/components/icons/figma-glyph";
+import { dispatchTimerStopped } from "@/lib/timer-events";
 import { timerApi } from "@/services/api/timer.api";
-import {
-  connectRealtime,
-  disconnectRealtime,
-} from "@/services/realtime/socket";
+import { connectRealtime, disconnectRealtime } from "@/services/realtime/socket";
 import { useAuthStore } from "@/store/auth.store";
 import { useTimerStore } from "@/store/timer.store";
 
@@ -23,12 +23,43 @@ export function WorkspaceSelector() {
   const setOrganizationId = useAuthStore((s) => s.setOrganizationId);
   const tokens = useAuthStore((s) => s.tokens);
   const hydrateFromApi = useTimerStore((s) => s.hydrateFromApi);
+  const resetTimer = useTimerStore((s) => s.reset);
 
-  const current =
-    organizations.find((o) => o.id === organizationId) ?? organizations[0];
+  const current = organizations.find((o) => o.id === organizationId) ?? organizations[0];
 
   const switchOrganization = async (orgId: string) => {
     if (orgId === organizationId) return;
+
+    // Queued timer events replay with the active org's credentials.
+    if (useTimerStore.getState().isOfflineSession) {
+      toast.message("Waiting for saved time to sync before switching workspace");
+      return;
+    }
+
+    // Stop and save a live session while the previous org is still the active
+    // tenant, so the entry lands in the org it was actually tracked for.
+    const status = useTimerStore.getState().timer.status;
+    if (status === "running" || status === "paused") {
+      try {
+        const result = await timerApi.stop();
+        const entries = result?.entries ?? [];
+        const seconds =
+          result?.totalDurationSeconds ||
+          entries.reduce((sum, entry) => sum + (entry.duration ?? 0), 0);
+        dispatchTimerStopped({
+          totalDurationSeconds: seconds,
+          entryCount: result?.count ?? entries.length,
+        });
+        toast.success(
+          current?.name ? `Timer stopped and saved to ${current.name}` : "Timer stopped and saved",
+        );
+      } catch {
+        toast.error("Could not stop the running timer — staying in this workspace");
+        return;
+      }
+    }
+
+    resetTimer();
     setOrganizationId(orgId);
 
     disconnectRealtime();
@@ -54,8 +85,8 @@ export function WorkspaceSelector() {
 
   if (!current) {
     return (
-      <div className="flex items-center gap-2 rounded-full border border-[#e6e6e6] bg-[#f5f5f5] px-2 py-1.5">
-        <span className="max-w-[100px] truncate text-sm font-medium text-[#1e2939]">
+      <div className="flex items-center gap-2 rounded-full border border-[#e6e6e6] bg-[#f5f5f5] px-2 py-1.5 dark:border-[#334155] dark:bg-[#1e293b]">
+        <span className="max-w-[100px] truncate text-sm font-medium text-[#1e2939] dark:text-[#f1f5f9]">
           No org
         </span>
       </div>
@@ -67,7 +98,7 @@ export function WorkspaceSelector() {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex items-center gap-2 rounded-full border border-[#e6e6e6] bg-[#f5f5f5] px-2 py-1.5 outline-none transition-colors duration-150 hover:bg-[#efefef] focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35 data-[state=open]:bg-[#efefef]"
+          className="flex items-center gap-2 rounded-full border border-[#e6e6e6] bg-[#f5f5f5] px-2 py-1.5 outline-none transition-colors duration-150 hover:bg-[#efefef] focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35 data-[state=open]:bg-[#efefef] dark:border-[#334155] dark:bg-[#1e293b] dark:hover:bg-[#334155] dark:data-[state=open]:bg-[#334155]"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -77,14 +108,14 @@ export function WorkspaceSelector() {
             width={16}
             height={16}
           />
-          <span className="max-w-[100px] truncate text-sm font-medium text-[#1e2939]">
+          <span className="max-w-[100px] truncate text-sm font-medium text-[#1e2939] dark:text-[#f1f5f9]">
             {current.name}
           </span>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/figma/icon-chevron-16.svg"
             alt=""
-            className="size-4 opacity-70"
+            className={`size-4 opacity-70 ${DARK_INK_INVERT}`}
             width={16}
             height={16}
           />

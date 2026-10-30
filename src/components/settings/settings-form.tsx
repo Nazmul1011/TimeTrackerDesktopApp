@@ -1,6 +1,5 @@
 /**
- * Settings form — notifications, launch on login, org screenshot interval.
- * Theme switching is not available yet (Coming soon).
+ * Settings form — notifications, launch on login, org screenshot interval, theme.
  */
 "use client";
 
@@ -12,12 +11,16 @@ import { monitoringApi } from "@/services/api/monitoring.api";
 import { useSettingsStore } from "@/store/settings.store";
 import { toast } from "sonner";
 
+const THEME_OPTIONS = [
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+  { value: "system", label: "System" },
+] as const;
+
 export function SettingsForm() {
   const settings = useSettingsStore((s) => s.settings);
   const setSettings = useSettingsStore((s) => s.setSettings);
-  const [orgIntervalMinutes, setOrgIntervalMinutes] = useState<number | null>(
-    null,
-  );
+  const [orgIntervalMinutes, setOrgIntervalMinutes] = useState<number | null>(null);
   const [orgScreenshotsEnabled, setOrgScreenshotsEnabled] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -28,8 +31,7 @@ export function SettingsForm() {
       .then((cfg) => {
         if (cancelled) return;
         const minutes = Number(cfg?.screenshotInterval);
-        const resolved =
-          Number.isFinite(minutes) && minutes > 0 ? minutes : 5;
+        const resolved = Number.isFinite(minutes) && minutes > 0 ? minutes : 5;
         setOrgIntervalMinutes(resolved);
         setOrgScreenshotsEnabled(cfg?.screenshotEnabled !== false);
         void setSettings({ screenshotIntervalMinutes: resolved });
@@ -113,9 +115,7 @@ export function SettingsForm() {
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <Label className="text-xs">Screenshot interval</Label>
-          <p className="text-[11px] text-[var(--text-muted)]">
-            Set by your organization admin
-          </p>
+          <p className="text-[11px] text-[var(--text-muted)]">Set by your organization admin</p>
         </div>
         <span className="shrink-0 text-xs text-[var(--text-muted)]">
           {!orgScreenshotsEnabled
@@ -130,12 +130,38 @@ export function SettingsForm() {
         <div className="min-w-0">
           <Label className="text-xs">Theme</Label>
           <p className="text-[11px] text-[var(--text-muted)]">
-            Light / dark switching
+            System follows your computer&apos;s setting
           </p>
         </div>
-        <span className="shrink-0 text-xs text-[var(--text-muted)]">
-          Coming soon
-        </span>
+        <div
+          role="radiogroup"
+          aria-label="Theme"
+          className="flex shrink-0 rounded-lg bg-[var(--surface-elevated)] p-0.5"
+        >
+          {THEME_OPTIONS.map((option) => {
+            const active = settings.theme === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                disabled={busy === "theme"}
+                onClick={() => {
+                  if (active) return;
+                  void update("theme", { theme: option.value }, `${option.label} theme`);
+                }}
+                className={`h-7 rounded-md px-2.5 text-xs transition-colors ${
+                  active
+                    ? "bg-white font-medium text-foreground shadow-sm dark:bg-[#334155]"
+                    : "text-[var(--text-subtle)] hover:text-foreground"
+                }`}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

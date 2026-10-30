@@ -1,6 +1,6 @@
 {
   "name": "gr8r-timetracker-desktop",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "description": "Gr8r Time Tracker + HRM Desktop Client",
   "private": true,
   "author": {
@@ -17,14 +17,18 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,md,yml,yaml}\"",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "electron:compile": "tsc -p tsconfig.electron.json",
-    "verify:screenshot-compress": "npm run electron:compile && node dist-electron/services/screenshots/compress.verify.js",
-    "electron": "npm run electron:compile && env -u ELECTRON_RUN_AS_NODE electron . --no-sandbox",
-    "electron:dev": "npm run electron:compile && concurrently -k -n next,electron -c blue,magenta \"next dev -p 3000\" \"wait-on tcp:3000 && env -u ELECTRON_RUN_AS_NODE electron . --no-sandbox\"",
-    "electron:build": "npm run build && npm run electron:compile && env -u ELECTRON_RUN_AS_NODE electron-builder",
-    "electron:build:mac": "npm run build && npm run electron:compile && env -u ELECTRON_RUN_AS_NODE electron-builder --mac dmg",
-    "electron:build:win": "npm run build && npm run electron:compile && env -u ELECTRON_RUN_AS_NODE electron-builder --win nsis",
-    "electron:build:linux": "npm run build && npm run electron:compile && env -u ELECTRON_RUN_AS_NODE electron-builder --linux AppImage deb",
-    "prepare": "husky || true"
+    "electron:icon": "node scripts/ensure-dev-runtime.cjs",
+    "electron": "npm run electron:compile && npm run electron:icon && node scripts/launch-electron.cjs",
+    "electron:dev": "npm run electron:compile && concurrently -k -n next,electron -c blue,magenta \"next dev -p 3000\" \"wait-on tcp:3000 && npm run electron:icon && node scripts/launch-electron.cjs\"",
+    "electron:build": "npm run build && npm run electron:compile && node scripts/run-electron-builder.cjs",
+    "electron:build:win": "npm run build && npm run electron:compile && node scripts/run-electron-builder.cjs --win nsis",
+    "electron:publish:win": "npm run build && npm run electron:compile && node scripts/run-electron-builder.cjs --win nsis --publish always",
+    "electron:build:mac": "npm run build && npm run electron:compile && node scripts/run-electron-builder.cjs --mac dmg zip",
+    "electron:publish:mac": "npm run build && npm run electron:compile && node scripts/run-electron-builder.cjs --mac dmg zip --publish always",
+    "electron:build:linux": "npm run build && npm run electron:compile && node scripts/run-electron-builder.cjs --linux AppImage deb",
+    "electron:publish:linux": "npm run build && npm run electron:compile && node scripts/run-electron-builder.cjs --linux AppImage deb --publish always",
+    "prepare": "husky || true",
+    "verify:screenshot-compress": "npm run electron:compile && node dist-electron/services/screenshots/compress.verify.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.1.1",
@@ -60,6 +64,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-hook-form": "^7.60.0",
+    "react-icons": "^5.7.0",
     "sharp": "^0.34.5",
     "socket.io-client": "^4.8.3",
     "sonner": "^2.0.6",
@@ -107,7 +112,6 @@
   "build": {
     "appId": "com.gr8r.timetracker",
     "productName": "Gr8r Time Tracker",
-    "copyright": "Copyright © 2026 Gr8r",
     "directories": {
       "output": "release",
       "buildResources": "resources"
@@ -119,7 +123,7 @@
       "package.json"
     ],
     "asarUnpack": [
-      "**/*.{node,dll}",
+      "**/*.{node,dylib,so,dll}",
       "**/better-sqlite3/**",
       "**/sharp/**",
       "**/@img/**"
@@ -130,6 +134,25 @@
         "to": "resources"
       }
     ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "resources/icons/icon.icns",
+      "identity": "Md shamir Rahman (7BK872D6A5)",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "Gr8r Time Tracker needs Automation access to detect which application you are using while the timer is running.",
+        "NSScreenCaptureUsageDescription": "Gr8r Time Tracker needs Screen Recording permission to capture work screenshots while the timer is running.",
+        "NSUserNotificationsUsageDescription": "Gr8r Time Tracker sends a notification when the timer pauses because you were idle."
+      }
+    },
+    "afterPack": "./scripts/after-pack-mac-icon.cjs",
+    "dmg": {
+      "icon": "resources/icons/icon.icns",
+      "iconSize": 80
+    },
     "win": {
       "icon": "resources/icons/icon.ico"
     },
@@ -138,13 +161,31 @@
       "icon": "icons",
       "maintainer": "Gr8r <admin@gr8r.studio>",
       "target": [
-        "AppImage"
+        "AppImage",
+        "deb"
+      ]
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0",
+        "xinput",
+        "xdotool",
+        "x11-utils"
       ]
     },
     "publish": {
       "provider": "github",
       "owner": "Nazmul1011",
       "repo": "TimeTrackerDesktopApp"
-    }
+    },
+    "copyright": "Copyright © 2026 Gr8r"
   }
 }

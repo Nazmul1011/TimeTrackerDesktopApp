@@ -2,7 +2,21 @@
  * Persist / restore the live timer snapshot in Electron main.
  */
 import { getElectronAPI } from "@/services/electron";
+import { isOfflineNow } from "@/lib/network";
 import { useTimerStore } from "@/store/timer.store";
+
+/** The durable outbox lives in Electron main; a plain browser tab has none. */
+export function canQueueOffline(): boolean {
+  return Boolean(getElectronAPI()?.sync?.enqueueTimerEvent);
+}
+
+/**
+ * Once anything is queued, later actions must queue behind it even if the
+ * network is back: the server can't pause a start it hasn't received yet.
+ */
+export function shouldQueueTimerEvent(): boolean {
+  return canQueueOffline() && (isOfflineNow() || useTimerStore.getState().isOfflineSession);
+}
 
 export function persistLocalTimer() {
   const api = getElectronAPI();

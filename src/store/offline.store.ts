@@ -19,7 +19,9 @@ interface OfflineState {
 }
 
 export const useOfflineStore = create<OfflineState>((set) => ({
-  online: typeof navigator === "undefined" ? true : navigator.onLine,
+  // Same value on server and client so the static export hydrates cleanly;
+  // useOfflineSync sets the real state on mount.
+  online: true,
   syncing: false,
   pending: { timer: 0, activity: 0, screenshots: 0 },
   setOnline: (online) => set({ online }),

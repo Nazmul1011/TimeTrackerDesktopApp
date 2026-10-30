@@ -5,19 +5,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import axios from "axios";
 import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout/header";
+import { OfflineBanner } from "@/components/offline-banner";
 import { TimerCard } from "@/components/timer/timer-card";
 import { SummaryTab } from "@/components/summary/summary-tab";
 import { TimesheetTab } from "@/components/timesheet/timesheet-tab";
 import { ScreenshotGrid } from "@/components/screenshots/screenshot-grid";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ROUTES } from "@/constants/routes";
-import { useTimerSync } from "@/hooks/useTimerSync";
-import { useTrackingAgent } from "@/hooks/useTrackingAgent";
-import { useOfflineSync } from "@/hooks/useOfflineSync";
 import { HOME_TAB_EVENT } from "@/lib/notification-nav";
-import { OfflineBanner } from "@/components/offline-banner";
 import { authApi } from "@/services/api/auth.api";
 import { orgApi } from "@/services/api/org.api";
 import { timerApi } from "@/services/api/timer.api";
@@ -32,14 +30,11 @@ export default function HomePage() {
   const router = useRouter();
   const setSession = useAuthStore((s) => s.setSession);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const hasHydrated = useAuthStore((s) => s.hasHydrated);
   const organizationId = useAuthStore((s) => s.organizationId);
   const tokens = useAuthStore((s) => s.tokens);
   const hydrateFromApi = useTimerStore((s) => s.hydrateFromApi);
   const [activeTab, setActiveTab] = useState<HomeTab>("summary");
-
-  useTrackingAgent();
-  useTimerSync({ onFocus: true });
-  useOfflineSync();
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -51,6 +46,7 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
+    if (!hasHydrated) return;
     if (!tokens.accessToken && !tokens.refreshToken) {
       router.replace(ROUTES.LOGIN);
       return;
@@ -60,17 +56,13 @@ export default function HomePage() {
 
     async function bootstrap() {
       try {
-        const [me, organizations] = await Promise.all([
-          authApi.me(),
-          orgApi.listMine(),
-        ]);
+        const [me, organizations] = await Promise.all([authApi.me(), orgApi.listMine()]);
         if (cancelled) return;
 
         const orgId =
-          organizationId &&
-          organizations.some((o) => o.id === organizationId)
+          organizationId && organizations.some((o) => o.id === organizationId)
             ? organizationId
-            : organizations[0]?.id ?? null;
+            : (organizations[0]?.id ?? null);
 
         setSession({
           user: mapApiUserToUser(me),
@@ -85,34 +77,35 @@ export default function HomePage() {
           });
           try {
             const current = await timerApi.current();
-            if (!cancelled && !useTimerStore.getState().isOfflineSession) {
-              hydrateFromApi(current);
-            }
+            if (!cancelled) hydrateFromApi(current);
           } catch {
             // Keep whatever timer state we already have (do not drop a running session)
           }
         }
-      } catch (error) {
-        const status =
-          typeof error === "object" &&
-          error !== null &&
-          "response" in error
-            ? (error as { response?: { status?: number } }).response?.status
-            : undefined;
-        if (!cancelled && status === 401) {
+      } catch (err) {
+        if (cancelled) return;
+        // Only a rejected login sends the user back to sign in. Offline at
+        // launch, a sleeping network or a server restart must not log anyone
+        // out: keep the saved session and try again shortly.
+        const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+        if (status === 401) {
           router.replace(ROUTES.LOGIN);
+          return;
         }
+        retryTimer = setTimeout(() => void bootstrap(), 5_000);
       }
     }
 
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
     void bootstrap();
 
     return () => {
       cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
     };
-    // intentionally omit organizationId to avoid re-bootstrap on org switch
+    // organizationId omitted so org switch does not re-bootstrap
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, router, setSession, tokens.accessToken, hydrateFromApi]);
+  }, [hasHydrated, isAuthenticated, router, setSession, tokens.accessToken, hydrateFromApi]);
 
   return (
     <div className="app-shell">
@@ -121,23 +114,27 @@ export default function HomePage() {
       <TimerCard />
 
       <section className="surface-card flex min-h-[250px] flex-col gap-3 p-3">
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as HomeTab)} className="w-full">
-          <TabsList className="grid h-10 w-full grid-cols-3 rounded-lg bg-[#f5f5f5] p-1">
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => setActiveTab(v as HomeTab)}
+          className="w-full"
+        >
+          <TabsList className="grid h-10 w-full grid-cols-3 rounded-lg bg-[#f5f5f5] p-1 dark:bg-[#1e293b]">
             <TabsTrigger
               value="summary"
-              className="h-8 rounded-full text-sm font-normal shadow-none transition-colors hover:text-[#1e2939] data-[state=active]:rounded-md data-[state=active]:border data-[state=active]:border-[#ededed] data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-none data-[state=inactive]:text-[#4a5565] data-[state=inactive]:hover:bg-white/70"
+              className="h-8 rounded-full text-sm font-normal shadow-none transition-colors hover:text-[#1e2939] data-[state=active]:rounded-md data-[state=active]:border data-[state=active]:border-[#ededed] data-[state=active]:bg-white data-[state=active]:text-black data-[state=inactive]:text-[#4a5565] data-[state=active]:shadow-none data-[state=inactive]:hover:bg-white/70 dark:hover:text-[#f1f5f9] dark:data-[state=active]:border-[#475569] dark:data-[state=active]:bg-[#334155] dark:data-[state=active]:text-[#f1f5f9] dark:data-[state=inactive]:text-[#94a3b8] dark:data-[state=inactive]:hover:bg-[#334155]/60"
             >
               Summary
             </TabsTrigger>
             <TabsTrigger
               value="timesheet"
-              className="h-8 rounded-full text-sm font-normal shadow-none transition-colors hover:text-[#1e2939] data-[state=active]:rounded-md data-[state=active]:border data-[state=active]:border-[#ededed] data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-none data-[state=inactive]:text-[#4a5565] data-[state=inactive]:hover:bg-white/70"
+              className="h-8 rounded-full text-sm font-normal shadow-none transition-colors hover:text-[#1e2939] data-[state=active]:rounded-md data-[state=active]:border data-[state=active]:border-[#ededed] data-[state=active]:bg-white data-[state=active]:text-black data-[state=inactive]:text-[#4a5565] data-[state=active]:shadow-none data-[state=inactive]:hover:bg-white/70 dark:hover:text-[#f1f5f9] dark:data-[state=active]:border-[#475569] dark:data-[state=active]:bg-[#334155] dark:data-[state=active]:text-[#f1f5f9] dark:data-[state=inactive]:text-[#94a3b8] dark:data-[state=inactive]:hover:bg-[#334155]/60"
             >
               Timesheet
             </TabsTrigger>
             <TabsTrigger
               value="screenshots"
-              className="h-8 rounded-full text-sm font-normal shadow-none transition-colors hover:text-[#1e2939] data-[state=active]:rounded-md data-[state=active]:border data-[state=active]:border-[#ededed] data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-none data-[state=inactive]:text-[#4a5565] data-[state=inactive]:hover:bg-white/70"
+              className="h-8 rounded-full text-sm font-normal shadow-none transition-colors hover:text-[#1e2939] data-[state=active]:rounded-md data-[state=active]:border data-[state=active]:border-[#ededed] data-[state=active]:bg-white data-[state=active]:text-black data-[state=inactive]:text-[#4a5565] data-[state=active]:shadow-none data-[state=inactive]:hover:bg-white/70 dark:hover:text-[#f1f5f9] dark:data-[state=active]:border-[#475569] dark:data-[state=active]:bg-[#334155] dark:data-[state=active]:text-[#f1f5f9] dark:data-[state=inactive]:text-[#94a3b8] dark:data-[state=inactive]:hover:bg-[#334155]/60"
             >
               Screenshots
             </TabsTrigger>

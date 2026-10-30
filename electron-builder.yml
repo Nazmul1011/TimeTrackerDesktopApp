@@ -2,6 +2,7 @@
 appId: com.gr8r.timetracker
 productName: Gr8r Time Tracker
 copyright: Copyright © 2026 Gr8r
+author: Nazmul Rahman
 
 directories:
   output: release
@@ -14,19 +15,40 @@ files:
   - package.json
 
 asarUnpack:
-  - "**/*.{node,dll}"
+  - "**/*.{node,dylib,so,dll}"
   - "**/better-sqlite3/**"
+  - "**/sharp/**"
+  - "**/@img/**"
 
 extraResources:
   - from: resources
     to: resources
 
+afterPack: ./scripts/after-pack-mac-icon.cjs
+
 mac:
   category: public.app-category.productivity
   target:
-    - dmg
-    - zip
+    - target: dmg
+      arch: arm64
+    - target: zip
+      arch: arm64
   icon: resources/icons/icon.icns
+  identity: "Md shamir Rahman (7BK872D6A5)"
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    CFBundleIconFile: icon.icns
+    NSAppleEventsUsageDescription: Gr8r Time Tracker needs Automation access to detect which application you are using while the timer is running.
+    NSScreenCaptureUsageDescription: Gr8r Time Tracker needs Screen Recording permission to capture work screenshots while the timer is running.
+    NSUserNotificationsUsageDescription: Gr8r Time Tracker sends a notification when the timer pauses because you were idle.
+    LSApplicationCategoryType: public.app-category.productivity
+
+dmg:
+  icon: resources/icons/icon.icns
+  iconSize: 80
 
 win:
   target:
@@ -39,11 +61,29 @@ linux:
   maintainer: Gr8r <admin@gr8r.studio>
   target:
     - AppImage
+    - deb
+
+deb:
+  # xinput: idle detection. xdotool/x11-utils (xprop): active window for Top Apps.
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
+    - xinput
+    - xdotool
+    - x11-utils
 
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
 
 publish:
-  provider: generic
-  url: https://updates.gr8r.com/timetracker/
+  provider: github
+  owner: Nazmul1011
+  repo: TimeTrackerDesktopApp

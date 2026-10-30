@@ -1,73 +1,100 @@
 /**
- * Restore the persisted Electron session before any page decides to show login.
+ * Restores the desktop session after launch / renderer reload.
+ * Hydrates tokens from localStorage, refreshes JWT if needed, then reloads profile.
  */
 "use client";
 
-import { useEffect, type ReactNode } from "react";
-import { STORAGE_KEYS } from "@/constants/storage";
-import { isNetworkError } from "@/lib/network";
+import { useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { AUTH_EVENTS } from "@/constants/storage";
+import { ROUTES } from "@/constants/routes";
+import { isAccessTokenExpiring } from "@/lib/jwt";
 import { authApi } from "@/services/api/auth.api";
-import { loadPersistedAuthSession } from "@/services/electron/auth-session";
-import { isElectron } from "@/services/electron";
+import { refreshAccessToken } from "@/services/api/client";
+import { orgApi } from "@/services/api/org.api";
+import { connectRealtime } from "@/services/realtime/socket";
 import { useAuthStore } from "@/store/auth.store";
+import { mapApiUserToUser } from "@/types";
 
-export function AuthBootstrap({ children }: { children: ReactNode }) {
-  const sessionHydrated = useAuthStore((s) => s.sessionHydrated);
+function connectIfPossible() {
+  const { tokens, organizationId } = useAuthStore.getState();
+  if (!tokens.accessToken || !organizationId) return;
+  connectRealtime({
+    token: tokens.accessToken,
+    organizationId,
+  });
+}
+
+async function restoreSession() {
+  const store = useAuthStore.getState();
+  const { tokens } = store;
+  if (!tokens.accessToken && !tokens.refreshToken) return;
+
+  if (isAccessTokenExpiring(tokens.accessToken) && tokens.refreshToken) {
+    const next = await refreshAccessToken();
+    if (next) {
+      useAuthStore.getState().setSession({ accessToken: next });
+    }
+  }
+
+  try {
+    const [me, organizations] = await Promise.all([authApi.me(), orgApi.listMine()]);
+
+    const current = useAuthStore.getState();
+    const orgId =
+      current.organizationId && organizations.some((org) => org.id === current.organizationId)
+        ? current.organizationId
+        : (organizations[0]?.id ?? null);
+
+    current.setSession({
+      user: mapApiUserToUser(me),
+      organizations,
+      organizationId: orgId,
+    });
+    connectIfPossible();
+  } catch {
+    // Keep the persisted session on network / backend errors.
+    connectIfPossible();
+  }
+}
+
+export function AuthBootstrap() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const hasHydrated = useAuthStore((s) => s.hasHydrated);
+  const hydrate = useAuthStore((s) => s.hydrate);
   const setSession = useAuthStore((s) => s.setSession);
-  const markSessionHydrated = useAuthStore((s) => s.markSessionHydrated);
   const clearSession = useAuthStore((s) => s.clearSession);
 
   useEffect(() => {
-    let cancelled = false;
+    hydrate();
+  }, [hydrate]);
 
-    async function hydrate() {
-      try {
-        if (isElectron()) {
-          const persisted = await loadPersistedAuthSession();
-          if (cancelled) return;
+  useEffect(() => {
+    if (!hasHydrated) return;
+    void restoreSession();
+  }, [hasHydrated]);
 
-          if (persisted) {
-            if (persisted.deviceId) {
-              localStorage.setItem(STORAGE_KEYS.DEVICE_ID, persisted.deviceId);
-            }
-            setSession({
-              accessToken: persisted.accessToken,
-              refreshToken: persisted.refreshToken,
-              sessionToken: persisted.sessionToken,
-              organizationId: persisted.organizationId,
-              deviceId: persisted.deviceId,
-            });
-
-            if (persisted.refreshToken) {
-              try {
-                const refreshed = await authApi.refresh(persisted.refreshToken);
-                if (cancelled) return;
-                setSession({ accessToken: refreshed.access_token });
-              } catch (error) {
-                // Stay signed in when the network is down so offline tracking works.
-                if (!isNetworkError(error) && !cancelled) {
-                  clearSession();
-                }
-              }
-            }
-          }
-        }
-      } catch (error) {
-        console.warn("[auth] failed to restore persisted session", error);
-      } finally {
-        if (!cancelled) markSessionHydrated();
-      }
-    }
-
-    void hydrate();
-    return () => {
-      cancelled = true;
+  useEffect(() => {
+    const onRefreshed = (event: Event) => {
+      const accessToken = (event as CustomEvent<{ accessToken?: string }>).detail?.accessToken;
+      if (accessToken) setSession({ accessToken });
     };
-  }, [clearSession, markSessionHydrated, setSession]);
 
-  if (!sessionHydrated) {
-    return <div className="min-h-screen bg-[#f9fafb]" />;
-  }
+    const onInvalid = () => {
+      clearSession();
+      if (pathname !== ROUTES.LOGIN) {
+        router.replace(ROUTES.LOGIN);
+      }
+    };
 
-  return children;
+    window.addEventListener(AUTH_EVENTS.TOKEN_REFRESHED, onRefreshed);
+    window.addEventListener(AUTH_EVENTS.SESSION_INVALID, onInvalid);
+    return () => {
+      window.removeEventListener(AUTH_EVENTS.TOKEN_REFRESHED, onRefreshed);
+      window.removeEventListener(AUTH_EVENTS.SESSION_INVALID, onInvalid);
+    };
+  }, [clearSession, pathname, router, setSession]);
+
+  return null;
 }

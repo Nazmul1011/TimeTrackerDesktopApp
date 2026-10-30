@@ -10,7 +10,8 @@ export function OfflineBanner() {
   const isOfflineSession = useTimerStore((s) => s.isOfflineSession);
   const queued = hasOfflineQueue(pending);
 
-  if (online && !queued && !isOfflineSession && !syncing) return null;
+  // The outbox flushes on a timer; with nothing queued that isn't worth showing.
+  if (online && !queued && !isOfflineSession) return null;
 
   const label = !online
     ? "You're offline. Time, activity, and screenshots are saved on this device."
@@ -23,7 +24,7 @@ export function OfflineBanner() {
   if (!label) return null;
 
   return (
-    <div className="rounded-lg border border-[#f0d78c] bg-[#fff8e6] px-3 py-2 text-xs text-[#7a5b00]">
+    <div className="rounded-lg border border-[#f0d78c] bg-[#fff8e6] px-3 py-2 text-xs text-[#7a5b00] dark:border-[#78590f] dark:bg-[#2b2410] dark:text-[#f0d78c]">
       {label}
     </div>
   );

@@ -1,5 +1,7 @@
 /**
- * Listen for real keyboard / mouse-button events on X11 via `xinput test-xi2`.
+ * Listen for real keyboard / mouse events on X11 via `xinput test-xi2`.
+ * This is the only reliable input signal on Linux: on X11 Electron's
+ * getCursorScreenPoint() goes stale and getSystemIdleTime() can stay at 0.
  * Ignores auto-repeat and synthetic/hotkey devices so a stuck media key cannot
  * look like 100% activity.
  */
@@ -11,9 +13,13 @@ const JUNK_DEVICE =
 
 /** XF86WakeUp / media / brightness / power — often spam or "stuck". */
 const IGNORED_KEYCODES = new Set([
-  121, 122, 123, 124, 150, 151, 160, 161, 166, 167, 171, 172, 173, 174, 179,
-  232, 233, 235, 237, 238, 246,
+  121, 122, 123, 124, 150, 151, 160, 161, 166, 167, 171, 172, 173, 174, 179, 232, 233, 235, 237,
+  238, 246,
 ]);
+
+/** A few raw motions close together, so a lone sensor jitter isn't "activity". */
+const MOTION_WINDOW_MS = 300;
+const MOTION_MIN_EVENTS = 3;
 
 type ParsedEvent = {
   name: string;
@@ -29,6 +35,8 @@ export class LinuxXInputListener {
   private junkDevices = new Set<number>();
   private onInput: ((kind: "keyboard" | "mouse") => void) | null = null;
   private startId = 0;
+  private motionWindowStart = 0;
+  private motionCount = 0;
 
   async start(onInput: (kind: "keyboard" | "mouse") => void): Promise<boolean> {
     this.killProcess();
@@ -62,14 +70,12 @@ export class LinuxXInputListener {
     proc.on("exit", (code, signal) => {
       if (this.proc !== proc) return;
       if (code || signal) {
-        log.warn(
-          `[IdleService] xinput exited code=${code} signal=${signal ?? ""}`,
-        );
+        log.warn(`[IdleService] xinput exited code=${code} signal=${signal ?? ""}`);
       }
       this.proc = null;
     });
 
-    log.info("[IdleService] xinput keyboard/click listener started");
+    log.info("[IdleService] xinput input listener started");
     return true;
   }
 
@@ -150,6 +156,20 @@ export class LinuxXInputListener {
 
     if (event.name === "ButtonPress") {
       this.onInput("mouse");
+      return;
+    }
+
+    if (event.name === "RawMotion") {
+      const now = Date.now();
+      if (now - this.motionWindowStart > MOTION_WINDOW_MS) {
+        this.motionWindowStart = now;
+        this.motionCount = 0;
+      }
+      this.motionCount += 1;
+      if (this.motionCount >= MOTION_MIN_EVENTS) {
+        this.motionCount = 0;
+        this.onInput("mouse");
+      }
     }
   }
 }

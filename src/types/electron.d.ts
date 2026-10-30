@@ -6,12 +6,14 @@
 export interface ElectronAPI {
   auth: {
     login: (payload: unknown) => Promise<unknown>;
-    logout: () => Promise<{ ok: boolean }>;
+    logout: () => Promise<unknown>;
     getSession: () => Promise<{
       accessToken: string | null;
       refreshToken: string | null;
       sessionToken: string | null;
       organizationId: string | null;
+      user: unknown | null;
+      organizations: unknown[] | null;
       deviceId: string | null;
     } | null>;
     saveSession: (payload: {
@@ -19,7 +21,9 @@ export interface ElectronAPI {
       refreshToken: string | null;
       sessionToken: string | null;
       organizationId: string | null;
-      deviceId: string | null;
+      user: unknown | null;
+      organizations: unknown[] | null;
+      deviceId?: string | null;
     }) => Promise<{ ok: boolean; message?: string }>;
   };
   timer: {
@@ -30,10 +34,11 @@ export interface ElectronAPI {
     getStatus: () => Promise<unknown>;
   };
   activity: {
-    getIdleState: (
-      thresholdSeconds?: number,
-    ) => Promise<{ idle: boolean; idleMs: number }>;
+    getIdleState: (thresholdSeconds?: number) => Promise<{ idle: boolean; idleMs: number }>;
     getActiveWindow: () => Promise<{ appName: string; windowTitle: string }>;
+    /** Real OS app icon as data-URL PNG, or null */
+    getAppIcon: (appName: string) => Promise<string | null>;
+    getAppIcons: (appNames: string[]) => Promise<Record<string, string | null>>;
     getSummary: () => Promise<unknown>;
     start: () => Promise<{ ok: boolean }>;
     stop: () => Promise<{ ok: boolean }>;
@@ -81,22 +86,23 @@ export interface ElectronAPI {
     }>;
     status: () => Promise<{ running: boolean }>;
     onUploaded: (
-      callback: (payload: {
-        id?: string;
-        url?: string;
+      callback: (payload: { id?: string; url?: string; activityPercent?: number }) => void,
+    ) => () => void;
+    onFailed: (callback: (payload: { message?: string }) => void) => () => void;
+    onAuthExpired: (callback: () => void) => () => void;
+    onTokenRefreshed: (callback: (payload: { accessToken?: string }) => void) => () => void;
+    onIdleTimeout: (
+      callback: (payload?: {
+        intervalMs?: number;
         activityPercent?: number;
+        /** ISO time the idle stretch began (now minus the idle timeout). */
+        idleSince?: string;
       }) => void,
     ) => () => void;
-    onFailed: (
-      callback: (payload: { message?: string }) => void,
-    ) => () => void;
-    onAuthExpired: (callback: () => void) => () => void;
-    onTokenRefreshed: (
-      callback: (payload: { accessToken?: string }) => void,
-    ) => () => void;
-    onIdleTimeout: (
-      callback: (payload?: { intervalMs?: number; activityPercent?: number }) => void,
-    ) => () => void;
+    onIdleResume: (callback: (payload?: { resumedAt?: string }) => void) => () => void;
+    disarmIdleResume: () => Promise<{ ok: boolean }>;
+    openScreenRecording: () => Promise<{ ok: boolean }>;
+    retryScreenshots: () => Promise<{ ok: boolean; message?: string }>;
   };
   notification: {
     show: (payload: {
@@ -190,6 +196,7 @@ export interface ElectronAPI {
       activity: number;
       screenshots: number;
     }>;
+    onOrgAccessDenied?: (callback: (payload: { organizationId?: string }) => void) => () => void;
     onStatus: (
       callback: (payload: {
         status: string;
@@ -199,12 +206,32 @@ export interface ElectronAPI {
       }) => void,
     ) => () => void;
   };
-  window: {
-    scheduleRevealAfterResume: (payload?: {
-      delayMs?: number;
+  tray: {
+    setState: (payload: {
+      authenticated?: boolean;
+      timerStatus?: "idle" | "running" | "paused";
     }) => Promise<{ ok: boolean }>;
+    onCommand: (
+      callback: (payload: {
+        action?: "pause" | "resume" | "stop" | "signOut" | "stopAndQuit";
+      }) => void,
+    ) => () => void;
+  };
+  app?: {
+    exit: () => Promise<void>;
+  };
+  updater?: {
+    onDownloaded: (callback: (payload: { version: string }) => void) => () => void;
+    install: () => Promise<void>;
+    check: () => Promise<unknown>;
+  };
+  window: {
+    scheduleRevealAfterResume: (payload?: { delayMs?: number }) => Promise<{ ok: boolean }>;
     cancelReveal: () => Promise<{ ok: boolean }>;
     revealNow: () => Promise<{ ok: boolean }>;
+    setTimerStatus: (
+      status: "idle" | "running" | "paused",
+    ) => Promise<{ ok: boolean; message?: string }>;
   };
   platform: NodeJS.Platform;
   versions: {
