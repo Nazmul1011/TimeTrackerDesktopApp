@@ -402,7 +402,7 @@ export class OfflineQueue {
     if (db) {
       const row = db.prepare(
         "SELECT file_path AS filePath FROM outbox_screenshots WHERE id = ?",
-      ).get() as { filePath: string } | undefined;
+      ).get(id) as { filePath: string } | undefined;
       db.prepare(
         "UPDATE outbox_screenshots SET status = 'synced' WHERE id = ?",
       ).run(id);
