@@ -30,8 +30,8 @@ export function SettingsForm() {
       .getConfig()
       .then((cfg) => {
         if (cancelled) return;
-        const minutes = Number(cfg?.screenshotInterval);
-        const resolved = Number.isFinite(minutes) && minutes > 0 ? minutes : 5;
+        // Personal build: fixed at 5 minutes (see useTrackingAgent).
+        const resolved = 5;
         setOrgIntervalMinutes(resolved);
         setOrgScreenshotsEnabled(cfg?.screenshotEnabled !== false);
         void setSettings({ screenshotIntervalMinutes: resolved });
@@ -115,7 +115,7 @@ export function SettingsForm() {
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <Label className="text-xs">Screenshot interval</Label>
-          <p className="text-[11px] text-[var(--text-muted)]">Set by your organization admin</p>
+          <p className="text-[11px] text-[var(--text-muted)]">First one 5 minutes after Start</p>
         </div>
         <span className="shrink-0 text-xs text-[var(--text-muted)]">
           {!orgScreenshotsEnabled

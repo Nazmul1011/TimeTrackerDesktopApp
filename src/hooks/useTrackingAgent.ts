@@ -30,7 +30,12 @@ type Sample = {
 
 const ACTIVITY_SAMPLE_MS = 10_000;
 const FLUSH_MS = 30_000;
-const FIRST_SCREENSHOT_MS = 3_000;
+/**
+ * Personal build: a screenshot every 5 minutes, the first one 5 minutes after
+ * Start, whatever interval the organization admin has set.
+ */
+const SCREENSHOT_INTERVAL_MS = 5 * 60_000;
+const FIRST_SCREENSHOT_MS = SCREENSHOT_INTERVAL_MS;
 const TOKEN_REFRESH_MS = 8 * 60_000;
 const CONFIG_POLL_MS = 30_000;
 
@@ -43,11 +48,8 @@ function dispatchActivityFlushed() {
   window.dispatchEvent(new CustomEvent(ACTIVITY_FLUSHED_EVENT));
 }
 
-function resolveScreenshotIntervalMs(cfg: MonitoringConfig | null): number {
-  const minutes = Number(cfg?.screenshotInterval);
-  const safeMinutes =
-    Number.isFinite(minutes) && minutes > 0 ? Math.min(60, Math.max(1, minutes)) : 5;
-  return safeMinutes * 60_000;
+function resolveScreenshotIntervalMs(_cfg: MonitoringConfig | null): number {
+  return SCREENSHOT_INTERVAL_MS;
 }
 
 function screenshotsAllowed(cfg: MonitoringConfig | null): boolean {

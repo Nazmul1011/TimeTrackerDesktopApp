@@ -226,14 +226,12 @@ export class TrackingService {
     }
     this.firstShotTimer = setTimeout(() => {
       void this.captureAndUpload().then((result) => {
-        if (
-          !result.ok ||
-          gen !== this.screenshotLoopGen ||
-          !this.running ||
-          !this.options.enableScreenshots
-        ) {
+        if (gen !== this.screenshotLoopGen || !this.running || !this.options.enableScreenshots) {
           return;
         }
+        // macOS without Screen Recording stays blocked until retryScreenshots();
+        // anywhere else one failed capture must not end the whole session's loop.
+        if (!result.ok && process.platform === "darwin") return;
         this.screenshotTimer = setInterval(() => {
           void this.captureAndUpload();
         }, this.options.screenshotIntervalMs);
@@ -574,14 +572,11 @@ export class TrackingService {
 
     log.info(`[TrackingService] idle for one screenshot interval — pausing timer`);
 
-    if (this.options.enableScreenshots) {
-      const started = Date.now();
-      while (this.capturing && Date.now() - started < 15_000) {
-        await new Promise((resolve) => setTimeout(resolve, 150));
-      }
-      if (!this.capturing && Date.now() - this.lastCaptureAt > 8_000) {
-        await this.captureAndUpload();
-      }
+    // Personal build: no extra screenshot at idle pause, so shots stay on the
+    // 5-minute rhythm. Let an in-flight capture finish before stopping.
+    const started = Date.now();
+    while (this.capturing && Date.now() - started < 15_000) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
     }
 
     NotificationService.getInstance().showTimerIdlePaused(idleMs);
