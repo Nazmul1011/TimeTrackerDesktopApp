@@ -13,6 +13,15 @@ files:
   - out/**/*
   - public/**/*
   - package.json
+  # Native build leftovers and docs never load at runtime.
+  - "!**/node_modules/better-sqlite3/{deps,src,docs,benchmark}/**"
+  - "!**/node_modules/better-sqlite3/build/Release/{obj,obj.target,.deps}/**"
+  - "!**/node_modules/better-sqlite3/build/Release/test_extension.node"
+  - "!**/node_modules/**/*.{md,map,ts}"
+
+# Only English UI strings; Chromium ships ~55 locales (~42 MB).
+electronLanguages:
+  - en-US
 
 asarUnpack:
   - "**/*.{node,dylib,so,dll}"

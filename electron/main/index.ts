@@ -51,6 +51,9 @@ if (process.platform === "linux") {
   // the process exits immediately when launched from the desktop menu.
   app.commandLine.appendSwitch("no-sandbox");
   app.commandLine.appendSwitch("disable-gpu-sandbox");
+  // A 446x640 window of static UI gains nothing from the GPU; the GPU process
+  // alone costs ~100 MB of RAM. Screenshot capture doesn't depend on it.
+  app.disableHardwareAcceleration();
   app.commandLine.appendSwitch(
     "enable-features",
     "WebRTCPipeWireCapturer,AllowSystemNotifications",

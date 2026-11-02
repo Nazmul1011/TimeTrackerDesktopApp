@@ -31,6 +31,14 @@
     "verify:screenshot-compress": "npm run electron:compile && node dist-electron/services/screenshots/compress.verify.js"
   },
   "dependencies": {
+    "dotenv": "^16.6.1",
+    "electron-log": "^5.4.1",
+    "electron-store": "^8.2.0",
+    "electron-updater": "^6.6.2",
+    "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.6",
     "@hookform/resolvers": "^5.1.1",
     "@radix-ui/react-alert-dialog": "^1.1.14",
     "@radix-ui/react-avatar": "^1.1.10",
@@ -48,32 +56,6 @@
     "@radix-ui/react-toast": "^1.2.14",
     "@radix-ui/react-tooltip": "^1.2.7",
     "@tanstack/react-query": "^5.83.0",
-    "axios": "^1.10.0",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
-    "cmdk": "^1.1.1",
-    "dayjs": "^1.11.13",
-    "dotenv": "^16.6.1",
-    "electron-log": "^5.4.1",
-    "electron-store": "^8.2.0",
-    "electron-updater": "^6.6.2",
-    "framer-motion": "^12.23.6",
-    "lucide-react": "^0.525.0",
-    "next": "^15.4.1",
-    "next-themes": "^0.4.6",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "react-hook-form": "^7.60.0",
-    "react-icons": "^5.7.0",
-    "sharp": "^0.34.5",
-    "socket.io-client": "^4.8.3",
-    "sonner": "^2.0.6",
-    "tailwind-merge": "^3.3.1",
-    "zod": "^3.25.76",
-    "zustand": "^5.0.6"
-  },
-  "devDependencies": {
-    "@eslint/eslintrc": "^3.3.6",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.16.3",
     "@types/react": "^19.1.8",
@@ -81,21 +63,39 @@
     "@typescript-eslint/eslint-plugin": "^8.37.0",
     "@typescript-eslint/parser": "^8.37.0",
     "autoprefixer": "^10.4.21",
+    "axios": "^1.10.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
     "concurrently": "^9.2.0",
+    "dayjs": "^1.11.13",
     "electron": "^37.2.1",
     "electron-builder": "^26.0.12",
     "eslint": "^9.31.0",
     "eslint-config-next": "^15.4.1",
     "eslint-config-prettier": "^10.1.5",
+    "framer-motion": "^12.23.6",
     "husky": "^9.1.7",
     "lint-staged": "^16.1.2",
+    "lucide-react": "^0.525.0",
+    "next": "^15.4.1",
+    "next-themes": "^0.4.6",
     "postcss": "^8.5.6",
     "prettier": "^3.6.2",
     "prettier-plugin-tailwindcss": "^0.6.14",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-hook-form": "^7.60.0",
+    "react-icons": "^5.7.0",
+    "socket.io-client": "^4.8.3",
+    "sonner": "^2.0.6",
+    "tailwind-merge": "^3.3.1",
     "tailwindcss": "^3.4.17",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.8.3",
-    "wait-on": "^8.0.3"
+    "wait-on": "^8.0.3",
+    "zod": "^3.25.76",
+    "zustand": "^5.0.6"
   },
   "optionalDependencies": {
     "better-sqlite3": "^11.10.0"
@@ -120,7 +120,11 @@
       "dist-electron/**/*",
       "out/**/*",
       "public/**/*",
-      "package.json"
+      "package.json",
+      "!**/node_modules/better-sqlite3/{deps,src,docs,benchmark}/**",
+      "!**/node_modules/better-sqlite3/build/Release/{obj,obj.target,.deps,test_extension.node}/**",
+      "!**/node_modules/better-sqlite3/build/Release/test_extension.node",
+      "!**/node_modules/**/*.{md,map,ts}"
     ],
     "asarUnpack": [
       "**/*.{node,dylib,so,dll}",
@@ -186,6 +190,9 @@
       "owner": "Nazmul1011",
       "repo": "TimeTrackerDesktopApp"
     },
-    "copyright": "Copyright © 2026 Gr8r"
+    "copyright": "Copyright © 2026 Gr8r",
+    "electronLanguages": [
+      "en-US"
+    ]
   }
 }
