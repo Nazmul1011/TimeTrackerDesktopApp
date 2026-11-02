@@ -148,7 +148,7 @@
         "NSUserNotificationsUsageDescription": "Gr8r Time Tracker sends a notification when the timer pauses because you were idle."
       }
     },
-    "afterPack": "./scripts/after-pack-mac-icon.cjs",
+    "afterPack": "./scripts/after-pack.cjs",
     "dmg": {
       "icon": "resources/icons/icon.icns",
       "iconSize": 80

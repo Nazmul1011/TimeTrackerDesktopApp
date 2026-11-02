@@ -24,7 +24,7 @@ extraResources:
   - from: resources
     to: resources
 
-afterPack: ./scripts/after-pack-mac-icon.cjs
+afterPack: ./scripts/after-pack.cjs
 
 mac:
   category: public.app-category.productivity
