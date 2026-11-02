@@ -13,7 +13,6 @@ import { ActivityService } from "../activity";
 import { InputActivityMonitor } from "../input-activity";
 import { IdleService } from "../idle";
 import { NotificationService } from "../notifications";
-import { WindowRevealService } from "../window-reveal";
 import { MacPermissions } from "../mac-permissions";
 import { getMainApiBaseUrl } from "../../api-url";
 
@@ -186,7 +185,6 @@ export class TrackingService {
     if (this.stopTimer) {
       clearTimeout(this.stopTimer);
     }
-    WindowRevealService.getInstance().cancel();
     // Survive React Strict Mode remounts and brief timer-sync blips.
     this.stopTimer = setTimeout(() => {
       this.stopTimer = null;

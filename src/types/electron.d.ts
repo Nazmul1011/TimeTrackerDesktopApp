@@ -226,8 +226,6 @@ export interface ElectronAPI {
     check: () => Promise<unknown>;
   };
   window: {
-    scheduleRevealAfterResume: (payload?: { delayMs?: number }) => Promise<{ ok: boolean }>;
-    cancelReveal: () => Promise<{ ok: boolean }>;
     revealNow: () => Promise<{ ok: boolean }>;
     setTimerStatus: (
       status: "idle" | "running" | "paused",

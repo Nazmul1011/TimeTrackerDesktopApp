@@ -1,5 +1,7 @@
 /**
- * Brings the main window to the front after the timer is resumed.
+ * Brings the main window to the front — only ever on a user action (tray,
+ * notification click, launching the app again). Timer and idle events must
+ * never call this: the window stays where the user left it.
  */
 import { app, BrowserWindow } from "electron";
 import log from "electron-log/main";
@@ -8,33 +10,11 @@ import { applyDockIconSoon } from "../../utils/dock-icon";
 export class WindowRevealService {
   private static instance: WindowRevealService | null = null;
 
-  private revealTimer: NodeJS.Timeout | null = null;
-
   static getInstance(): WindowRevealService {
     if (!WindowRevealService.instance) {
       WindowRevealService.instance = new WindowRevealService();
     }
     return WindowRevealService.instance;
-  }
-
-  /** Schedule a one-shot reveal after resume (e.g. after idle auto-pause). */
-  scheduleAfterResume(delayMs: number): void {
-    this.cancel();
-    if (!Number.isFinite(delayMs) || delayMs <= 0) return;
-
-    log.info(`[WindowRevealService] scheduled reveal in ${Math.round(delayMs / 1000)}s`);
-
-    this.revealTimer = setTimeout(() => {
-      this.revealTimer = null;
-      this.revealNow({ bounce: true });
-    }, delayMs);
-  }
-
-  cancel(): void {
-    if (this.revealTimer) {
-      clearTimeout(this.revealTimer);
-      this.revealTimer = null;
-    }
   }
 
   private lastRevealAt = 0;

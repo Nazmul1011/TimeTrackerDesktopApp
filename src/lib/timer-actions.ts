@@ -6,7 +6,6 @@ import { formatElapsed } from "@/lib/dayjs";
 import { isNetworkError } from "@/lib/network";
 import { sanitizeProjectId } from "@/lib/project";
 import { dispatchTimerStopped } from "@/lib/timer-events";
-import { cancelWindowReveal } from "@/lib/window-reveal";
 import { getElectronAPI, isElectron } from "@/services/electron";
 import { timerApi } from "@/services/api/timer.api";
 import {
@@ -46,7 +45,6 @@ export async function pauseTimer(): Promise<void> {
   await runTimerMutation(async () => {
     const occurredAt = new Date().toISOString();
     const announcePaused = () => {
-      cancelWindowReveal();
       if (isElectron()) {
         void getElectronAPI()?.tracking.disarmIdleResume?.();
         void getElectronAPI()?.notification?.show?.({
@@ -143,7 +141,6 @@ export async function stopTimer(options?: {
         next.setTodayLoggedSeconds(previousLogged / 1000 + sessionSeconds);
       }
       persistLocalTimer();
-      cancelWindowReveal();
       dispatchTimerStopped({
         totalDurationSeconds: sessionSeconds,
         entryCount: sessionSeconds > 0 ? 1 : 0,
@@ -174,7 +171,6 @@ export async function stopTimer(options?: {
       const savedSeconds = result?.totalDurationSeconds || fromEntries || sessionSeconds;
       useTimerStore.getState().setIdle();
       persistLocalTimer();
-      cancelWindowReveal();
       if (!options?.skipTodaySync) {
         if (savedSeconds > 0) {
           useTimerStore.getState().setTodayLoggedSeconds(previousLogged / 1000 + savedSeconds);
@@ -230,7 +226,6 @@ export async function resetDayTimer(): Promise<boolean> {
       store.reset();
       store.setProject(currentProject);
       dispatchTimerStopped({ totalDurationSeconds: 0, entryCount: 0 });
-      cancelWindowReveal();
       toast.success("Today’s time was reset to 00:00:00");
       ok = true;
     } catch (err) {

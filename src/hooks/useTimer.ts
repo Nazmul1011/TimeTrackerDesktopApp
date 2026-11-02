@@ -27,7 +27,6 @@ import {
   shouldQueueTimerEvent,
 } from "@/services/timer/offline-persist";
 import { sanitizeProjectId } from "@/lib/project";
-import { cancelWindowReveal } from "@/lib/window-reveal";
 import { useAuthStore } from "@/store/auth.store";
 import { useTimerStore } from "@/store/timer.store";
 
@@ -230,7 +229,6 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
               projectId: sanitizeProjectId(resolved),
               description: timer.description || undefined,
             });
-            cancelWindowReveal();
             toast.message("Timer started offline — will sync when you are back online");
           };
           if (shouldQueueTimerEvent()) {
@@ -245,7 +243,6 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
             });
             hydrateFromApi(apiTimer);
             persistLocalTimer();
-            cancelWindowReveal();
           } catch (err) {
             if (canQueueOffline() && isNetworkError(err)) {
               await startOffline();

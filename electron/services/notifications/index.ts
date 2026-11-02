@@ -53,7 +53,7 @@ export class NotificationService {
   show(
     title: string,
     body: string,
-    _options?: { urgency?: "normal" | "critical" | "low" },
+    options?: { urgency?: "normal" | "critical" | "low" },
   ): { ok: boolean; message?: string } {
     if (!SettingsService.getInstance().notificationsEnabled()) {
       log.info("[NotificationService] skipped — notifications disabled in settings");
@@ -62,6 +62,15 @@ export class NotificationService {
 
     const safeTitle = title || "Gr8r Time Tracker";
     const safeBody = body || "";
+
+    // Linux: a system notification, never an app window. The banner below is
+    // an always-on-top window of ours, so on idle pause/resume the app itself
+    // would come to the front of the screen.
+    if (process.platform === "linux") {
+      // "critical" stays on screen until dismissed; an idle alert shouldn't.
+      const urgency = options?.urgency === "critical" ? "normal" : options?.urgency;
+      return this.showElectron(safeTitle, safeBody, { urgency });
+    }
 
     // Compact on-screen banner only — native Windows toasts are large and
     // duplicated this banner. macOS already skips Notification Center.

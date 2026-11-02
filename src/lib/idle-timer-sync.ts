@@ -5,7 +5,6 @@
  * moment the user is back, even offline — and the server is told through an
  * ordered retry queue, with the real time each thing happened.
  */
-import { cancelWindowReveal } from "@/lib/window-reveal";
 import { timerApi } from "@/services/api/timer.api";
 import type { ApiTimer } from "@/services/api/types";
 import { useTimerStore } from "@/store/timer.store";
@@ -59,7 +58,6 @@ export function handleIdlePause(idleSince?: string): void {
     ? store.baseElapsedMs + (Date.now() - store.segmentStartedAt)
     : store.timer.elapsedMs;
   store.applyElapsedSeconds(Math.max(0, liveMs - idleMs) / 1000, "paused");
-  cancelWindowReveal();
   outbox.submit({ kind: "pause", occurredAt });
 }
 
