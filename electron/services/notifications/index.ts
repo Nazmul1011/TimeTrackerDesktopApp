@@ -29,27 +29,6 @@ export class NotificationService {
     return NotificationService.instance;
   }
 
-  /** Desktop alert when idle auto-pause pauses the timer. */
-  showTimerIdlePaused(idleMs: number): { ok: boolean; message?: string } {
-    const seconds = Math.max(1, Math.round(idleMs / 1000));
-    const duration =
-      seconds < 60
-        ? `${seconds} seconds`
-        : `${Math.max(1, Math.round(seconds / 60))} ${
-            Math.round(seconds / 60) === 1 ? "minute" : "minutes"
-          }`;
-    return this.show("Timer paused", `Idle for ${duration}. Move mouse or press a key to resume.`, {
-      urgency: "critical",
-    });
-  }
-
-  /** Desktop alert when idle auto-pause ends and tracking starts again. */
-  showTimerIdleResumed(): { ok: boolean; message?: string } {
-    return this.show("Timer resumed", "Idle pause removed. Tracking is running.", {
-      urgency: "normal",
-    });
-  }
-
   show(
     title: string,
     body: string,

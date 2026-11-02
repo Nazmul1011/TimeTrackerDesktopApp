@@ -12,7 +12,6 @@ import { OfflineQueue } from "../offline/queue";
 import { ActivityService } from "../activity";
 import { InputActivityMonitor } from "../input-activity";
 import { IdleService } from "../idle";
-import { NotificationService } from "../notifications";
 import { MacPermissions } from "../mac-permissions";
 import { getMainApiBaseUrl } from "../../api-url";
 
@@ -577,7 +576,7 @@ export class TrackingService {
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
 
-    NotificationService.getInstance().showTimerIdlePaused(idleMs);
+    // Personal build: idle pause/resume is silent (no desktop notification).
 
     this.running = false;
     // The timer is about to be paused; a paused timer is never auto-stopped.
@@ -620,7 +619,6 @@ export class TrackingService {
     this.clearIdleResumeWatch();
     this.lastIdleResumeEmitAt = Date.now();
     log.info("[TrackingService] input after idle pause — requesting timer resume");
-    NotificationService.getInstance().showTimerIdleResumed();
     this.emitToRenderer("tracking:idle-resume", {
       resumedAt: new Date().toISOString(),
     });
