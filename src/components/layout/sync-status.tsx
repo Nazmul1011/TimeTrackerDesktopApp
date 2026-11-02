@@ -61,10 +61,11 @@ export function SyncStatus({ className }: { className?: string }) {
   if (!available) return null;
 
   const count = pendingTotal(pending);
-  // The outbox is flushed every 25s even when empty; only spin for real work.
+  // Background flushes run every few seconds; only spin for an upload that is
+  // going through. While uploads keep failing, retries show as "waiting".
   const state: SyncState = !online
     ? "offline"
-    : (syncing && count > 0) || manualUntil > 0
+    : (syncing && count > 0 && !failed) || manualUntil > 0
       ? "syncing"
       : count > 0
         ? "waiting"
