@@ -13,7 +13,7 @@ import { useAuthStore } from "@/store/auth.store";
 import { useTimerStore } from "@/store/timer.store";
 import { isOfflineNow } from "@/lib/network";
 import { persistLocalTimer } from "@/services/timer/offline-persist";
-import { useOfflineStore } from "@/store/offline.store";
+import { SYNC_NOW_EVENT, useOfflineStore } from "@/store/offline.store";
 import { dispatchTimerStopped } from "@/lib/timer-events";
 
 export function useOfflineSync() {
@@ -41,6 +41,12 @@ export function useOfflineSync() {
       useOfflineStore.getState().setPending(pending);
       useOfflineStore.getState().setSyncing(status.status === "syncing");
       useOfflineStore.getState().setOnline(!isOfflineNow());
+      if (status.status && status.status !== "syncing") {
+        useOfflineStore.getState().setResult({
+          failed: status.status === "error",
+          lastSyncedAt: status.lastSyncedAt ?? useOfflineStore.getState().lastSyncedAt,
+        });
+      }
     };
 
     const restore = async () => {
@@ -120,8 +126,12 @@ export function useOfflineSync() {
     const onOffline = () => {
       useOfflineStore.getState().setOnline(false);
     };
+    const onSyncNow = () => {
+      void flush();
+    };
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
+    window.addEventListener(SYNC_NOW_EVENT, onSyncNow);
 
     const interval = window.setInterval(() => {
       persistLocalTimer();
@@ -138,6 +148,7 @@ export function useOfflineSync() {
       unsubDenied?.();
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
+      window.removeEventListener(SYNC_NOW_EVENT, onSyncNow);
       window.clearInterval(interval);
       window.clearInterval(persistId);
     };

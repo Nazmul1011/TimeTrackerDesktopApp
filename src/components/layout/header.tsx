@@ -8,6 +8,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BrandLogo } from "@/components/brand/brand-logo";
 import { DARK_INK_INVERT } from "@/components/icons/figma-glyph";
+import { SyncStatus } from "@/components/layout/sync-status";
 import { WorkspaceSelector } from "@/components/layout/workspace-selector";
 import { NotificationDropdownList } from "@/components/notification/notification-dropdown";
 import {
@@ -57,6 +58,7 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-2">
+        <SyncStatus className={headerIconClass} />
         <DropdownMenu
           onOpenChange={(open) => {
             if (open) void loadNotifications();
