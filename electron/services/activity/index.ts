@@ -3,10 +3,12 @@
  * Uses platform CLIs when available; falls back to a safe placeholder.
  */
 import { execFile } from "child_process";
+import fs from "fs";
 import path from "path";
 import { promisify } from "util";
 import log from "electron-log/main";
 import { getResourcesRoot } from "../../utils";
+import { isExcludedApp } from "./exclusions";
 
 const execFileAsync = promisify(execFile);
 
@@ -15,12 +17,24 @@ export type ActiveWindowInfo = {
   windowTitle: string;
   /** macOS .app path or Windows exe path when known */
   bundlePath?: string;
+  /**
+   * The focused app is on the exclusion list. Name, title and path are
+   * blanked, and callers must not record or upload anything for it.
+   */
+  excluded?: boolean;
 };
+
+/** What callers get for an excluded app: no identifying fields at all. */
+const EXCLUDED_WINDOW: ActiveWindowInfo = Object.freeze({
+  appName: "",
+  windowTitle: "",
+  excluded: true,
+});
 
 export class ActivityService {
   private static instance: ActivityService | null = null;
   private running = false;
-  private cache: { at: number; value: ActiveWindowInfo } | null = null;
+  private cache: { at: number; value: ActiveWindowInfo & { exePath?: string } } | null = null;
   private static readonly CACHE_MS = 2_500;
 
   static getInstance(): ActivityService {
@@ -45,12 +59,22 @@ export class ActivityService {
     return this.running;
   }
 
+  /**
+   * Focused window, with excluded apps redacted. The exclusion check runs on
+   * every call (not just on cache refill) so a settings change applies at once.
+   */
   async getActiveWindow(): Promise<ActiveWindowInfo> {
+    const { exePath, ...raw } = await this.getRawActiveWindow();
+    if (isExcludedApp({ ...raw, exePath })) return { ...EXCLUDED_WINDOW };
+    return raw;
+  }
+
+  private async getRawActiveWindow(): Promise<ActiveWindowInfo & { exePath?: string }> {
     if (this.cache && Date.now() - this.cache.at < ActivityService.CACHE_MS) {
       return this.cache.value;
     }
     try {
-      let value: ActiveWindowInfo;
+      let value: ActiveWindowInfo & { exePath?: string };
       if (process.platform === "linux") {
         value = await this.getLinuxActiveWindow();
       } else if (process.platform === "darwin") {
@@ -68,7 +92,12 @@ export class ActivityService {
     return { appName: "Desktop", windowTitle: "" };
   }
 
-  private async getLinuxActiveWindow(): Promise<ActiveWindowInfo> {
+  /**
+   * `exePath` is only used for the exclusion check. It is not passed on as
+   * `bundlePath`, because the icon service would try to read an icon from the
+   * raw binary on Linux and cache a blank one.
+   */
+  private async getLinuxActiveWindow(): Promise<ActiveWindowInfo & { exePath?: string }> {
     try {
       const { stdout: idOut } = await execFileAsync("xdotool", ["getactivewindow"], {
         timeout: 1500,
@@ -89,7 +118,19 @@ export class ActivityService {
       } catch {
         // ignore
       }
-      return { appName, windowTitle: title };
+      // Executable path stays the same when an app renames its window or
+      // restarts, so exclusions can match on it.
+      let exePath: string | undefined;
+      try {
+        const { stdout: pidOut } = await execFileAsync("xdotool", ["getwindowpid", windowId], {
+          timeout: 1500,
+        });
+        const pid = Number.parseInt(pidOut.trim(), 10);
+        if (pid > 0) exePath = await fs.promises.readlink(`/proc/${pid}/exe`);
+      } catch {
+        // no _NET_WM_PID or no access — name and title still get checked
+      }
+      return { appName, windowTitle: title, exePath };
     } catch {
       return { appName: "Desktop", windowTitle: "" };
     }

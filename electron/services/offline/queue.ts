@@ -7,6 +7,7 @@ import fs from "fs";
 import path from "path";
 import log from "electron-log/main";
 import { getDatabase, getUserDataDir } from "../../database/sqlite";
+import { isExcludedActivityPayload, isExcludedApp } from "../activity/exclusions";
 
 export type TimerEventType = "start" | "pause" | "resume" | "stop";
 
@@ -98,9 +99,9 @@ export class OfflineQueue {
     const createdAt = new Date().toISOString();
     const db = getDatabase();
     if (db) {
-      const row = db.prepare(
-        "SELECT COALESCE(MAX(seq), 0) AS maxSeq FROM timer_events",
-      ).get() as { maxSeq: number };
+      const row = db.prepare("SELECT COALESCE(MAX(seq), 0) AS maxSeq FROM timer_events").get() as {
+        maxSeq: number;
+      };
       const seq = Number(row?.maxSeq ?? 0) + 1;
       db.prepare(
         `INSERT INTO timer_events (id, seq, type, occurred_at, project_id, description, status, created_at)
@@ -127,8 +128,7 @@ export class OfflineQueue {
     }
 
     const store = readJson();
-    const seq =
-      store.timerEvents.reduce((max, event) => Math.max(max, event.seq), 0) + 1;
+    const seq = store.timerEvents.reduce((max, event) => Math.max(max, event.seq), 0) + 1;
     const event: TimerEventRow = {
       id,
       seq,
@@ -147,11 +147,13 @@ export class OfflineQueue {
   listPendingTimerEvents(): TimerEventRow[] {
     const db = getDatabase();
     if (db) {
-      const rows = db.prepare(
-        `SELECT id, seq, type, occurred_at AS occurredAt, project_id AS projectId,
+      const rows = db
+        .prepare(
+          `SELECT id, seq, type, occurred_at AS occurredAt, project_id AS projectId,
                 description, status, error
          FROM timer_events WHERE status = 'pending' ORDER BY seq ASC`,
-      ).all() as TimerEventRow[];
+        )
+        .all() as TimerEventRow[];
       return rows;
     }
     return readJson()
@@ -162,9 +164,7 @@ export class OfflineQueue {
   markTimerEventSynced(id: string) {
     const db = getDatabase();
     if (db) {
-      db.prepare(
-        "UPDATE timer_events SET status = 'synced', error = NULL WHERE id = ?",
-      ).run(id);
+      db.prepare("UPDATE timer_events SET status = 'synced', error = NULL WHERE id = ?").run(id);
       return;
     }
     const store = readJson();
@@ -177,9 +177,10 @@ export class OfflineQueue {
   markTimerEventFailed(id: string, error: string) {
     const db = getDatabase();
     if (db) {
-      db.prepare(
-        "UPDATE timer_events SET status = 'failed', error = ? WHERE id = ?",
-      ).run(error, id);
+      db.prepare("UPDATE timer_events SET status = 'failed', error = ? WHERE id = ?").run(
+        error,
+        id,
+      );
       return;
     }
     const store = readJson();
@@ -242,15 +243,15 @@ export class OfflineQueue {
   getLocalTimer(): LocalTimerSnapshot | null {
     const db = getDatabase();
     if (db) {
-      const row = db.prepare(
-        `SELECT status, local_id AS localId, server_id AS serverId, project_id AS projectId,
+      const row = db
+        .prepare(
+          `SELECT status, local_id AS localId, server_id AS serverId, project_id AS projectId,
                 description, started_at AS startedAt, elapsed_ms AS elapsedMs,
                 base_elapsed_ms AS baseElapsedMs, segment_started_at AS segmentStartedAt,
                 is_offline AS isOffline, today_logged_ms AS todayLoggedMs, today_date AS todayDate
          FROM local_timer WHERE id = 1`,
-      ).get() as
-        | (Omit<LocalTimerSnapshot, "isOffline"> & { isOffline: number })
-        | undefined;
+        )
+        .get() as (Omit<LocalTimerSnapshot, "isOffline"> & { isOffline: number }) | undefined;
       if (!row) return null;
       return {
         ...row,
@@ -268,7 +269,9 @@ export class OfflineQueue {
     };
   }
 
-  enqueueActivities(payloads: unknown[]) {
+  /** Excluded-app samples are dropped here so they never reach disk. */
+  enqueueActivities(input: unknown[]) {
+    const payloads = input.filter((payload) => !isExcludedActivityPayload(payload));
     if (!payloads.length) return;
     const createdAt = new Date().toISOString();
     const db = getDatabase();
@@ -296,9 +299,11 @@ export class OfflineQueue {
   listPendingActivities(limit = 80): Array<{ id: string; payload: unknown }> {
     const db = getDatabase();
     if (db) {
-      const rows = db.prepare(
-        `SELECT id, payload FROM outbox_activities WHERE status = 'pending' ORDER BY created_at ASC LIMIT ?`,
-      ).all(limit) as Array<{ id: string; payload: string }>;
+      const rows = db
+        .prepare(
+          `SELECT id, payload FROM outbox_activities WHERE status = 'pending' ORDER BY created_at ASC LIMIT ?`,
+        )
+        .all(limit) as Array<{ id: string; payload: string }>;
       return rows.map((row) => ({
         id: row.id,
         payload: JSON.parse(row.payload) as unknown,
@@ -314,9 +319,7 @@ export class OfflineQueue {
     if (!ids.length) return;
     const db = getDatabase();
     if (db) {
-      const stmt = db.prepare(
-        "UPDATE outbox_activities SET status = 'synced' WHERE id = ?",
-      );
+      const stmt = db.prepare("UPDATE outbox_activities SET status = 'synced' WHERE id = ?");
       for (const id of ids) stmt.run(id);
       return;
     }
@@ -328,12 +331,27 @@ export class OfflineQueue {
     writeJson(store);
   }
 
+  /** Remove rows outright (excluded-app data must not linger as "synced"). */
+  deleteActivities(ids: string[]) {
+    if (!ids.length) return;
+    const db = getDatabase();
+    if (db) {
+      const stmt = db.prepare("DELETE FROM outbox_activities WHERE id = ?");
+      for (const id of ids) stmt.run(id);
+      return;
+    }
+    const store = readJson();
+    const idSet = new Set(ids);
+    store.activities = store.activities.filter((row) => !idSet.has(row.id));
+    writeJson(store);
+  }
+
   pendingActivityCount(): number {
     const db = getDatabase();
     if (db) {
-      const row = db.prepare(
-        "SELECT COUNT(*) AS count FROM outbox_activities WHERE status = 'pending'",
-      ).get() as { count: number };
+      const row = db
+        .prepare("SELECT COUNT(*) AS count FROM outbox_activities WHERE status = 'pending'")
+        .get() as { count: number };
       return Number(row?.count ?? 0);
     }
     return readJson().activities.filter((row) => row.status === "pending").length;
@@ -346,7 +364,11 @@ export class OfflineQueue {
     windowTitle: string;
     mimeType: string;
     activityPercent: number;
-  }): string {
+  }): string | null {
+    if (isExcludedApp(input)) {
+      fs.unlink(input.filePath, () => undefined);
+      return null;
+    }
     const id = randomUUID();
     const createdAt = new Date().toISOString();
     const db = getDatabase();
@@ -385,12 +407,14 @@ export class OfflineQueue {
   listPendingScreenshots(limit = 8): ScreenshotOutboxRow[] {
     const db = getDatabase();
     if (db) {
-      return db.prepare(
-        `SELECT id, file_path AS filePath, timestamp, app_name AS appName,
+      return db
+        .prepare(
+          `SELECT id, file_path AS filePath, timestamp, app_name AS appName,
                 window_title AS windowTitle, mime_type AS mimeType,
                 activity_percent AS activityPercent, status
          FROM outbox_screenshots WHERE status = 'pending' ORDER BY created_at ASC LIMIT ?`,
-      ).all(limit) as ScreenshotOutboxRow[];
+        )
+        .all(limit) as ScreenshotOutboxRow[];
     }
     return readJson()
       .screenshots.filter((row) => row.status === "pending")
@@ -400,12 +424,10 @@ export class OfflineQueue {
   markScreenshotSynced(id: string) {
     const db = getDatabase();
     if (db) {
-      const row = db.prepare(
-        "SELECT file_path AS filePath FROM outbox_screenshots WHERE id = ?",
-      ).get(id) as { filePath: string } | undefined;
-      db.prepare(
-        "UPDATE outbox_screenshots SET status = 'synced' WHERE id = ?",
-      ).run(id);
+      const row = db
+        .prepare("SELECT file_path AS filePath FROM outbox_screenshots WHERE id = ?")
+        .get(id) as { filePath: string } | undefined;
+      db.prepare("UPDATE outbox_screenshots SET status = 'synced' WHERE id = ?").run(id);
       if (row?.filePath) {
         fs.unlink(row.filePath, () => undefined);
       }
@@ -422,12 +444,30 @@ export class OfflineQueue {
     }
   }
 
+  /** Remove the row and its image file (excluded-app screenshots). */
+  deleteScreenshot(id: string) {
+    const db = getDatabase();
+    if (db) {
+      const row = db
+        .prepare("SELECT file_path AS filePath FROM outbox_screenshots WHERE id = ?")
+        .get(id) as { filePath: string } | undefined;
+      db.prepare("DELETE FROM outbox_screenshots WHERE id = ?").run(id);
+      if (row?.filePath) fs.unlink(row.filePath, () => undefined);
+      return;
+    }
+    const store = readJson();
+    const found = store.screenshots.find((row) => row.id === id);
+    store.screenshots = store.screenshots.filter((row) => row.id !== id);
+    writeJson(store);
+    if (found?.filePath) fs.unlink(found.filePath, () => undefined);
+  }
+
   pendingScreenshotCount(): number {
     const db = getDatabase();
     if (db) {
-      const row = db.prepare(
-        "SELECT COUNT(*) AS count FROM outbox_screenshots WHERE status = 'pending'",
-      ).get() as { count: number };
+      const row = db
+        .prepare("SELECT COUNT(*) AS count FROM outbox_screenshots WHERE status = 'pending'")
+        .get() as { count: number };
       return Number(row?.count ?? 0);
     }
     return readJson().screenshots.filter((row) => row.status === "pending").length;

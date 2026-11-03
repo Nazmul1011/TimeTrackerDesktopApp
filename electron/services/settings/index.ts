@@ -11,6 +11,12 @@ export type DesktopSettings = {
   idleTimeoutMinutes: number;
   autoStartOnLogin: boolean;
   notificationsEnabled: boolean;
+  /**
+   * Extra apps to leave out of activity tracking, matched by name, window
+   * title or executable path. TeamLogger is always excluded on top of these
+   * (see services/activity/exclusions.ts).
+   */
+  excludedApps: string[];
 };
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
@@ -19,7 +25,17 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   idleTimeoutMinutes: 2,
   autoStartOnLogin: false,
   notificationsEnabled: true,
+  excludedApps: [],
 };
+
+function normalizeExcludedApps(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const names = value
+    .filter((v): v is string => typeof v === "string")
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0 && v.length <= 120);
+  return Array.from(new Set(names)).slice(0, 100);
+}
 
 function isTheme(v: unknown): v is DesktopSettings["theme"] {
   return v === "light" || v === "dark" || v === "system";
@@ -46,6 +62,7 @@ export function normalizeDesktopSettings(
         : DEFAULT_DESKTOP_SETTINGS.idleTimeoutMinutes,
     autoStartOnLogin: Boolean(merged.autoStartOnLogin),
     notificationsEnabled: merged.notificationsEnabled !== false,
+    excludedApps: normalizeExcludedApps(merged.excludedApps),
   };
 }
 

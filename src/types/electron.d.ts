@@ -35,10 +35,16 @@ export interface ElectronAPI {
   };
   activity: {
     getIdleState: (thresholdSeconds?: number) => Promise<{ idle: boolean; idleMs: number }>;
-    getActiveWindow: () => Promise<{ appName: string; windowTitle: string }>;
+    /**
+     * `excluded: true` means the focused app is on the exclusion list; name and
+     * title are blank and nothing should be recorded for it.
+     */
+    getActiveWindow: () => Promise<{ appName: string; windowTitle: string; excluded?: boolean }>;
     /** Real OS app icon as data-URL PNG, or null */
     getAppIcon: (appName: string) => Promise<string | null>;
     getAppIcons: (appNames: string[]) => Promise<Record<string, string | null>>;
+    /** Subset of `appNames` on the exclusion list. */
+    excludedAppNames?: (appNames: string[]) => Promise<string[]>;
     getSummary: () => Promise<unknown>;
     start: () => Promise<{ ok: boolean }>;
     stop: () => Promise<{ ok: boolean }>;

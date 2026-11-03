@@ -5,6 +5,7 @@ import { ipcMain } from "electron";
 import log from "electron-log/main";
 import { ActivityService } from "../services/activity";
 import { AppIconService } from "../services/app-icon";
+import { isExcludedApp } from "../services/activity/exclusions";
 import { IdleService } from "../services/idle";
 
 export function registerActivityIpc(): void {
@@ -35,6 +36,14 @@ export function registerActivityIpc(): void {
     if (!Array.isArray(appNames)) return {};
     const names = appNames.filter((n): n is string => typeof n === "string");
     return icons.getIconsDataUrl(names);
+  });
+
+  /** Names from server reports that belong to excluded apps (to hide them). */
+  ipcMain.handle("activity:excludedAppNames", async (_event, appNames?: unknown) => {
+    if (!Array.isArray(appNames)) return [];
+    return appNames.filter(
+      (name): name is string => typeof name === "string" && isExcludedApp({ appName: name }),
+    );
   });
 
   ipcMain.handle("activity:getSummary", async () => {

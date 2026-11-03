@@ -28,7 +28,8 @@
     "electron:build:linux": "npm run build && npm run electron:compile && node scripts/run-electron-builder.cjs --linux AppImage deb",
     "electron:publish:linux": "npm run build && npm run electron:compile && node scripts/run-electron-builder.cjs --linux AppImage deb --publish always",
     "prepare": "husky || true",
-    "verify:screenshot-compress": "npm run electron:compile && node dist-electron/services/screenshots/compress.verify.js"
+    "verify:screenshot-compress": "npm run electron:compile && node dist-electron/services/screenshots/compress.verify.js",
+    "verify:app-exclusions": "npm run electron:compile && node dist-electron/services/activity/exclusions.verify.js"
   },
   "dependencies": {
     "dotenv": "^16.6.1",

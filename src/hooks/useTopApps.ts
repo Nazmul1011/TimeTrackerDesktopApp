@@ -10,7 +10,7 @@ import { todayInZone } from "@/lib/org-date";
 import { ACTIVITY_FLUSHED_EVENT } from "@/hooks/useTrackingAgent";
 import { TIMER_STOPPED_EVENT } from "@/lib/timer-events";
 import { isPageHidden, onPageVisible } from "@/lib/visibility";
-import { activityApi } from "@/services/api/activity.api";
+import { activityApi, type ActivityAppRow } from "@/services/api/activity.api";
 import { getElectronAPI, isElectron } from "@/services/electron";
 import { isNetworkError } from "@/lib/network";
 import { useAuthStore } from "@/store/auth.store";
@@ -34,6 +34,29 @@ async function resolveIcons(appNames: string[]): Promise<Record<string, string |
   } catch {
     return {};
   }
+}
+
+/**
+ * Server reports can still hold excluded apps recorded before the exclusion
+ * existed. Hide them and rescale the remaining shares to 100%.
+ */
+async function withoutExcludedApps(rows: ActivityAppRow[]): Promise<ActivityAppRow[]> {
+  const api = isElectron() ? getElectronAPI() : null;
+  if (!rows.length || !api?.activity?.excludedAppNames) return rows;
+  let excluded: string[];
+  try {
+    excluded = await api.activity.excludedAppNames(rows.map((r) => r.appName));
+  } catch {
+    return rows;
+  }
+  if (!excluded.length) return rows;
+  const hidden = new Set(excluded);
+  const kept = rows.filter((r) => !hidden.has(r.appName));
+  const total = kept.reduce((sum, r) => sum + r.totalDuration, 0);
+  return kept.map((r) => ({
+    ...r,
+    percent: total > 0 ? Math.round((r.totalDuration / total) * 1000) / 10 : 0,
+  }));
 }
 
 export function useTopApps() {
@@ -65,11 +88,13 @@ export function useTopApps() {
       const today = todayInZone(orgTimezone);
 
       try {
-        const rows = await activityApi.getApps({
-          startDate: today,
-          endDate: today,
-          excludeIdle: true,
-        });
+        const rows = await withoutExcludedApps(
+          await activityApi.getApps({
+            startDate: today,
+            endDate: today,
+            excludeIdle: true,
+          }),
+        );
 
         if (isStale()) return;
 

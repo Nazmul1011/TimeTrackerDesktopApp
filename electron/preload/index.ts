@@ -73,6 +73,8 @@ const electronAPI = {
     getActiveWindow: () => ipcRenderer.invoke("activity:getActiveWindow"),
     getAppIcon: (appName: string) => ipcRenderer.invoke("activity:getAppIcon", appName),
     getAppIcons: (appNames: string[]) => ipcRenderer.invoke("activity:getAppIcons", appNames),
+    excludedAppNames: (appNames: string[]) =>
+      ipcRenderer.invoke("activity:excludedAppNames", appNames),
     getSummary: () => ipcRenderer.invoke("activity:getSummary"),
     start: () => ipcRenderer.invoke("activity:start"),
     stop: () => ipcRenderer.invoke("activity:stop"),

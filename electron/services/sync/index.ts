@@ -4,6 +4,7 @@
 import { BrowserWindow, net } from "electron";
 import fs from "fs";
 import log from "electron-log/main";
+import { isExcludedActivityPayload, isExcludedApp } from "../activity/exclusions";
 import { OfflineQueue, type TimerEventRow } from "../offline/queue";
 import { TrackingService, type TrackingAuth } from "../tracking";
 
@@ -300,7 +301,17 @@ export class SyncService {
     message?: string;
   }> {
     const queue = OfflineQueue.getInstance();
-    const batch = queue.listPendingActivities(80);
+    const pending = queue.listPendingActivities(80);
+    // Rows queued before an app was excluded (or by an older build) are
+    // deleted here instead of uploaded.
+    const excludedIds = pending
+      .filter((row) => isExcludedActivityPayload(row.payload))
+      .map((row) => row.id);
+    if (excludedIds.length) {
+      queue.deleteActivities(excludedIds);
+      log.info(`[SyncService] dropped ${excludedIds.length} excluded-app activity rows`);
+    }
+    const batch = pending.filter((row) => !excludedIds.includes(row.id));
     if (!batch.length) return { ok: true };
 
     const response = await this.apiFetch(auth, "/activity/bulk", {
@@ -332,6 +343,11 @@ export class SyncService {
       if (!fs.existsSync(row.filePath)) {
         log.warn("[SyncService] screenshot file missing, dropping", row.filePath);
         queue.markScreenshotSynced(row.id);
+        continue;
+      }
+      if (isExcludedApp(row)) {
+        log.info("[SyncService] dropping queued screenshot of an excluded app");
+        queue.deleteScreenshot(row.id);
         continue;
       }
       const uploaded = await tracking.uploadScreenshotFile(row.filePath, {

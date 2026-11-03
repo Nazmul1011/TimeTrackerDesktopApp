@@ -68,6 +68,8 @@ export function useTrackingAgent() {
     appName: string;
     windowTitle: string;
     isIdle: boolean;
+    /** Excluded app had focus — this interval is never recorded. */
+    excluded: boolean;
     at: number;
   } | null>(null);
   const configRef = useRef<MonitoringConfig | null>(null);
@@ -389,12 +391,14 @@ export function useTrackingAgent() {
         const prev = lastSampleRef.current;
 
         // Warm OS icon cache for Top Apps while tracking
-        if (win.appName && api.activity.getAppIcon) {
+        if (!win.excluded && win.appName && api.activity.getAppIcon) {
           void api.activity.getAppIcon(normalizeAppName(win.appName));
           void api.activity.getAppIcon(win.appName);
         }
 
-        if (prev) {
+        // An interval that started on an excluded app is dropped, not
+        // relabelled: no sample, no duration, no "Desktop" stand-in.
+        if (prev && !prev.excluded) {
           const durationSec = Math.max(1, Math.round((now - prev.at) / 1000));
           const appName = normalizeAppName(prev.appName);
           queueRef.current.push({
@@ -413,12 +417,15 @@ export function useTrackingAgent() {
           }
         }
 
-        lastSampleRef.current = {
-          appName: normalizeAppName(win.appName),
-          windowTitle: win.windowTitle || "",
-          isIdle: idle.idle,
-          at: now,
-        };
+        lastSampleRef.current = win.excluded
+          ? { appName: "", windowTitle: "", isIdle: idle.idle, excluded: true, at: now }
+          : {
+              appName: normalizeAppName(win.appName),
+              windowTitle: win.windowTitle || "",
+              isIdle: idle.idle,
+              excluded: false,
+              at: now,
+            };
       } catch (err) {
         console.warn("[tracking] activity sample failed", err);
       }

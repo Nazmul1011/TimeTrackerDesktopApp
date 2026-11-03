@@ -250,6 +250,8 @@ export class TrackingService {
 
   async captureAndUpload(): Promise<{
     ok: boolean;
+    /** Nothing captured because an excluded app had focus. */
+    skipped?: boolean;
     message?: string;
     id?: string;
     url?: string;
@@ -264,6 +266,16 @@ export class TrackingService {
 
     this.capturing = true;
     try {
+      // Excluded app in focus: take no screenshot at all (the image would
+      // show it). Throw away the input-activity window too, so the next
+      // screenshot only reports its own interval.
+      const activity = ActivityService.getInstance();
+      if ((await activity.getActiveWindow()).excluded) {
+        InputActivityMonitor.getInstance().consumePercent();
+        log.info("[TrackingService] screenshot skipped — excluded app in focus");
+        return { ok: true, skipped: true, message: "Skipped: excluded app in focus" };
+      }
+
       let shot = await ScreenshotService.getInstance().capture();
       if (!shot?.buffer?.length && process.platform !== "darwin") {
         await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -286,8 +298,13 @@ export class TrackingService {
         return { ok: false, message };
       }
 
-      const win = await ActivityService.getInstance().getActiveWindow();
+      const win = await activity.getActiveWindow();
       const activityPercent = InputActivityMonitor.getInstance().consumePercent();
+      if (win.excluded) {
+        // Focus moved to an excluded app during capture — discard the image.
+        log.info("[TrackingService] screenshot discarded — excluded app in focus");
+        return { ok: true, skipped: true, message: "Skipped: excluded app in focus" };
+      }
       const uploaded = await this.uploadBuffer(shot.buffer, {
         timestamp: shot.capturedAt,
         appName: win.appName || "Desktop",
