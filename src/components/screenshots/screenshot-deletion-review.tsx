@@ -4,6 +4,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { RequestListSkeleton } from "@/components/layout/section-skeletons";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { dayjs } from "@/lib/dayjs";
@@ -72,9 +73,7 @@ export function ScreenshotDeletionReview() {
 
       <div className="px-4 py-3">
         {loading ? (
-          <p className="py-4 text-center text-xs text-[var(--text-muted)]">
-            Loading pending requests…
-          </p>
+          <RequestListSkeleton />
         ) : requests.length === 0 ? (
           <p className="py-4 text-center text-xs text-[var(--text-muted)]">
             No pending deletion requests.

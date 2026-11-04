@@ -4,24 +4,29 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
-import {
-  mapApiNotification,
-  notificationsApi,
-} from "@/services/api/notifications.api";
+import { mapApiNotification, notificationsApi } from "@/services/api/notifications.api";
 import { notifyOs } from "@/lib/notify";
+import { isOfflineError } from "@/lib/offline-error";
+import { readCachedView, writeCachedView } from "@/lib/view-cache";
 import { useAuthStore } from "@/store/auth.store";
+import { CONNECTION_RESTORED_EVENT } from "@/store/connection.store";
 import { useNotificationStore } from "@/store/notification.store";
 import { useSettingsStore } from "@/store/settings.store";
 
 export const NOTIFICATIONS_CHANGED_EVENT = "gr8r:notifications-changed";
 
 const POLL_MS = 45_000;
+const NOTIFICATIONS_CACHE = "notifications";
+
+type SavedInbox = {
+  notifications: Awaited<ReturnType<typeof notificationsApi.list>>["notifications"];
+  unreadCount: number;
+};
 const LIST_POLL_MS = 30_000;
 
 function getErrorMessage(err: unknown, fallback: string): string {
   if (typeof err === "object" && err !== null && "response" in err) {
-    const response = (err as { response?: { data?: { message?: string } } })
-      .response;
+    const response = (err as { response?: { data?: { message?: string } } }).response;
     if (response?.data?.message) return response.data.message;
   }
   if (err instanceof Error && err.message) return err.message;
@@ -74,18 +79,17 @@ export function useNotifications(options?: {
       }
       try {
         const result = await notificationsApi.list({ limit: 40 });
+        writeCachedView(NOTIFICATIONS_CACHE, "-", {
+          notifications: result.notifications,
+          unreadCount: result.unreadCount,
+        });
         const mapped = result.notifications.map(mapApiNotification);
 
         const previousIds = knownIdsRef.current;
         const nextIds = new Set(mapped.map((n) => n.id));
         if (primedRef.current) {
-          const freshUnread = mapped.filter(
-            (n) => !previousIds.has(n.id) && !n.read,
-          );
-          if (
-            freshUnread.length > 0 &&
-            useSettingsStore.getState().settings.notificationsEnabled
-          ) {
+          const freshUnread = mapped.filter((n) => !previousIds.has(n.id) && !n.read);
+          if (freshUnread.length > 0 && useSettingsStore.getState().settings.notificationsEnabled) {
             for (const n of freshUnread.slice(0, 3)) {
               void notifyOs(n.title, n.body);
             }
@@ -97,8 +101,26 @@ export function useNotifications(options?: {
 
         setNotifications(mapped, result.unreadCount);
       } catch (err) {
+        // Offline: the inbox as last loaded (no OS alerts for these).
+        const saved = isOfflineError(err)
+          ? readCachedView<SavedInbox>(NOTIFICATIONS_CACHE, "-")
+          : null;
+        if (saved) {
+          if (useNotificationStore.getState().notifications.length === 0) {
+            setNotifications(
+              saved.data.notifications.map(mapApiNotification),
+              saved.data.unreadCount,
+            );
+          }
+          if (!opts?.silent) setError(null);
+          return;
+        }
         if (!opts?.silent) {
-          setError(getErrorMessage(err, "Failed to load notifications"));
+          setError(
+            isOfflineError(err)
+              ? "You're offline. Notifications load when you're back online."
+              : getErrorMessage(err, "Failed to load notifications"),
+          );
         }
       } finally {
         if (!opts?.silent) setLoading(false);
@@ -173,8 +195,11 @@ export function useNotifications(options?: {
       void refreshUnreadCount();
     };
     window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, onChanged);
-    return () =>
+    window.addEventListener(CONNECTION_RESTORED_EVENT, onChanged);
+    return () => {
       window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, onChanged);
+      window.removeEventListener(CONNECTION_RESTORED_EVENT, onChanged);
+    };
   }, [enabled, loadNotifications, refreshUnreadCount]);
 
   return {

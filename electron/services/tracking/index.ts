@@ -2,14 +2,25 @@
  * Main-process tracking loop — screenshots while the timer is running.
  * Capture lives in Electron main so it continues if the renderer is throttled.
  */
+import fs from "fs";
+import path from "path";
+import { randomUUID } from "crypto";
 import { app, BrowserWindow } from "electron";
 import log from "electron-log/main";
+import {
+  ackOutbox,
+  countScreenshotFiles,
+  enqueueOutbox,
+  listOutbox,
+  offlineScreenshotDir,
+} from "../../database/outbox";
 import { ScreenshotService } from "../screenshots";
 import { ActivityService } from "../activity";
 import { InputActivityMonitor } from "../input-activity";
 import { IdleService } from "../idle";
 import { NotificationService } from "../notifications";
 import { WindowRevealService } from "../window-reveal";
+import { setTrayTimerStatus } from "../../main/tray";
 import { MacPermissions } from "../mac-permissions";
 import { getMainApiBaseUrl } from "../../api-url";
 
@@ -37,7 +48,9 @@ export type TrackingOptions = {
  */
 const HEARTBEAT_MS = 60_000;
 const REFRESH_TIMEOUT_MS = 8_000;
+const UPLOAD_TIMEOUT_MS = 4_000;
 const HEARTBEAT_TIMEOUT_MS = 15_000;
+const IDLE_RESUME_GUARD_MS = 60_000;
 
 export class TrackingService {
   private static instance: TrackingService | null = null;
@@ -62,8 +75,11 @@ export class TrackingService {
   /** After idle auto-pause, wait for mouse/keyboard then resume (not manual Pause). */
   private awaitingIdleResume = false;
   private idleResumeTimer: NodeJS.Timeout | null = null;
+  private idleResumeGuard: NodeJS.Timeout | null = null;
   private lastIdleResumeEmitAt = 0;
   private lastCaptureAt = 0;
+  private flushTimer: NodeJS.Timeout | null = null;
+  private flushingShots = false;
 
   static getInstance(): TrackingService {
     if (!TrackingService.instance) {
@@ -98,6 +114,7 @@ export class TrackingService {
     if (auth.accessToken) {
       const waiters = this.authWaiters.splice(0);
       waiters.forEach((resolve) => resolve(true));
+      this.ensureScreenshotFlushLoop();
     }
   }
 
@@ -128,7 +145,7 @@ export class TrackingService {
     };
     this.running = true;
     this.idlePauseInFlight = false;
-    this.disarmIdleResume();
+    this.disarmIdleResume("tracking started");
     this.startHeartbeat();
 
     ActivityService.getInstance().start();
@@ -213,13 +230,8 @@ export class TrackingService {
       return;
     }
     this.firstShotTimer = setTimeout(() => {
-      void this.captureAndUpload().then((result) => {
-        if (
-          !result.ok ||
-          gen !== this.screenshotLoopGen ||
-          !this.running ||
-          !this.options.enableScreenshots
-        ) {
+      void this.captureAndUpload().finally(() => {
+        if (gen !== this.screenshotLoopGen || !this.running || !this.options.enableScreenshots) {
           return;
         }
         this.screenshotTimer = setInterval(() => {
@@ -290,6 +302,29 @@ export class TrackingService {
       });
 
       if (!uploaded.ok) {
+        const mimeType = shot.mimeType ?? "image/jpeg";
+        const localId = uploaded.retryable
+          ? this.queueScreenshot(shot.buffer, {
+              timestamp: shot.capturedAt,
+              appName: win.appName || "Desktop",
+              windowTitle: win.windowTitle || "",
+              mimeType,
+              activityPercent,
+            })
+          : null;
+        if (localId != null) {
+          log.info("[TrackingService] screenshot saved locally until the server is reachable");
+          const saved = {
+            id: `local-${localId}`,
+            url: `data:${mimeType};base64,${shot.buffer.toString("base64")}`,
+            activityPercent,
+            capturedAt: shot.capturedAt,
+            appName: win.appName || "Desktop",
+          };
+          this.lastCaptureAt = Date.now();
+          this.emitToRenderer("screenshot:uploaded", saved);
+          return { ok: true, message: "Saved offline", ...saved };
+        }
         this.emitToRenderer("screenshot:failed", {
           message: uploaded.message,
         });
@@ -327,6 +362,7 @@ export class TrackingService {
     id?: string;
     url?: string;
     activityPercent?: number;
+    retryable?: boolean;
   }> {
     if (!this.auth?.accessToken || !this.auth.organizationId) {
       return { ok: false, message: "Missing auth for screenshot upload" };
@@ -341,15 +377,27 @@ export class TrackingService {
           "Content-Type": contentType,
         },
         body,
+        signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
       });
     };
 
-    let response = await post();
+    let response: Response;
+    try {
+      response = await post();
+    } catch (error) {
+      log.warn("[TrackingService] upload failed", error);
+      return { ok: false, retryable: true, message: "Network error" };
+    }
 
     if (response.status === 401) {
       const refreshed = await this.refreshAccessToken();
       if (refreshed) {
-        response = await post();
+        try {
+          response = await post();
+        } catch (error) {
+          log.warn("[TrackingService] upload failed", error);
+          return { ok: false, retryable: true, message: "Network error" };
+        }
       }
     }
 
@@ -361,8 +409,13 @@ export class TrackingService {
 
     if (!response.ok || !json?.success) {
       const message = json?.message || `Upload failed with status ${response.status}`;
+      const retryable =
+        response.status === 0 ||
+        response.status === 408 ||
+        response.status === 429 ||
+        response.status >= 500;
       log.warn(`[TrackingService] upload failed: ${message}`);
-      return { ok: false, message };
+      return { ok: false, retryable, message };
     }
 
     return {
@@ -371,6 +424,91 @@ export class TrackingService {
       url: json.data?.url ?? json.data?.imageUrl,
       activityPercent: meta.activityPercent,
     };
+  }
+
+  private queueScreenshot(
+    buffer: Buffer,
+    meta: {
+      timestamp: string;
+      appName: string;
+      windowTitle: string;
+      mimeType: string;
+      activityPercent: number;
+    },
+  ): number | null {
+    if (countScreenshotFiles() >= 200) {
+      log.warn("[TrackingService] offline screenshot folder is full");
+      return null;
+    }
+    try {
+      const filePath = path.join(offlineScreenshotDir(), `${randomUUID()}.jpg`);
+      fs.writeFileSync(filePath, buffer);
+      const id = enqueueOutbox("screenshot", { ...meta, filePath });
+      if (id == null) {
+        fs.unlinkSync(filePath);
+        return null;
+      }
+      return id;
+    } catch (error) {
+      log.warn("[TrackingService] could not store screenshot offline", error);
+      return null;
+    }
+  }
+
+  private ensureScreenshotFlushLoop(): void {
+    if (this.flushTimer) return;
+    this.flushTimer = setInterval(() => {
+      void this.flushQueuedScreenshots();
+    }, 20_000);
+  }
+
+  async flushQueuedScreenshots(): Promise<{ ok: boolean; uploaded: number }> {
+    if (this.flushingShots || !this.auth?.accessToken) return { ok: false, uploaded: 0 };
+    this.flushingShots = true;
+    let uploaded = 0;
+    try {
+      const rows = listOutbox("screenshot");
+      for (const row of rows) {
+        const payload = row.payload as {
+          filePath?: string;
+          timestamp?: string;
+          appName?: string;
+          windowTitle?: string;
+          mimeType?: string;
+          activityPercent?: number;
+        };
+        if (!payload.filePath || !fs.existsSync(payload.filePath)) {
+          ackOutbox([row.id]);
+          continue;
+        }
+        const result = await this.uploadBuffer(fs.readFileSync(payload.filePath), {
+          timestamp: payload.timestamp || new Date().toISOString(),
+          appName: payload.appName || "Desktop",
+          windowTitle: payload.windowTitle || "",
+          mimeType: payload.mimeType || "image/jpeg",
+          activityPercent: payload.activityPercent ?? 0,
+        });
+        if (result.ok) {
+          uploaded += 1;
+          fs.unlinkSync(payload.filePath);
+          ackOutbox([row.id]);
+          this.emitToRenderer("screenshot:uploaded", result);
+          continue;
+        }
+        if (!result.retryable) {
+          ackOutbox([row.id]);
+          fs.unlinkSync(payload.filePath);
+          continue;
+        }
+        break;
+      }
+      return { ok: true, uploaded };
+    } catch (error) {
+      log.warn("[TrackingService] screenshot flush failed", error);
+      return { ok: false, uploaded };
+    } finally {
+      this.flushingShots = false;
+    }
   }
 
   private buildAuthHeaders(): Record<string, string> {
@@ -485,6 +623,7 @@ export class TrackingService {
     const idleMs = this.options.idleTimeoutMs ?? this.options.screenshotIntervalMs;
 
     log.info(`[TrackingService] idle for one screenshot interval — pausing timer`);
+    setTrayTimerStatus("paused");
 
     if (this.options.enableScreenshots) {
       const started = Date.now();
@@ -512,15 +651,42 @@ export class TrackingService {
     });
   }
 
-  /** Cancel auto-resume (Stop, logout, or a manual Pause that was never idle). */
-  disarmIdleResume() {
+  /**
+   * Cancel auto-resume (Stop, logout, a manual Pause or Resume). The reason is
+   * logged so a missed auto-resume can be traced.
+   */
+  disarmIdleResume(reason = "not given") {
+    if (this.awaitingIdleResume) {
+      log.info(`[TrackingService] idle auto-resume cancelled — ${reason}`);
+    }
     this.awaitingIdleResume = false;
     this.lastIdleResumeEmitAt = 0;
     this.clearIdleResumeWatch();
+    this.clearIdleResumeGuard();
+  }
+
+  /**
+   * The window still shows an idle pause: make sure the watcher is on. Does
+   * nothing while tracking runs, or when the watcher is already healthy.
+   */
+  armIdleResume(reason = "not given") {
+    if (this.running) return { ok: false, armed: false };
+    if (this.awaitingIdleResume && this.idleResumeWatchHealthy()) {
+      return { ok: true, armed: true };
+    }
+    log.info(`[TrackingService] idle auto-resume re-armed — ${reason}`);
+    this.awaitingIdleResume = true;
+    this.startIdleResumeWatch();
+    return { ok: true, armed: true };
+  }
+
+  private idleResumeWatchHealthy(): boolean {
+    return this.idleResumeTimer !== null && IdleService.getInstance().isWatching();
   }
 
   private startIdleResumeWatch() {
     this.clearIdleResumeWatch();
+    this.ensureIdleResumeGuard();
     IdleService.getInstance().startWatching();
     // Capture after startWatching so the seed lastInputAt is not treated as the user coming back.
     const baseline = Date.now();
@@ -536,8 +702,10 @@ export class TrackingService {
     if (!this.awaitingIdleResume) return;
     this.awaitingIdleResume = false;
     this.clearIdleResumeWatch();
+    this.clearIdleResumeGuard();
     this.lastIdleResumeEmitAt = Date.now();
     log.info("[TrackingService] input after idle pause — requesting timer resume");
+    setTrayTimerStatus("running");
     NotificationService.getInstance().showTimerIdleResumed();
     this.emitToRenderer("tracking:idle-resume", {
       resumedAt: new Date().toISOString(),
@@ -548,6 +716,24 @@ export class TrackingService {
     if (this.idleResumeTimer) {
       clearInterval(this.idleResumeTimer);
       this.idleResumeTimer = null;
+    }
+  }
+
+  /** Once a minute while waiting: if the watcher died, start it again. */
+  private ensureIdleResumeGuard() {
+    if (this.idleResumeGuard) return;
+    this.idleResumeGuard = setInterval(() => {
+      if (!this.awaitingIdleResume || this.running) return;
+      if (this.idleResumeWatchHealthy()) return;
+      log.warn("[TrackingService] idle auto-resume watcher was off — restarting it");
+      this.startIdleResumeWatch();
+    }, IDLE_RESUME_GUARD_MS);
+  }
+
+  private clearIdleResumeGuard() {
+    if (this.idleResumeGuard) {
+      clearInterval(this.idleResumeGuard);
+      this.idleResumeGuard = null;
     }
   }
 

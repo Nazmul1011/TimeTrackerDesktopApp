@@ -1,18 +1,18 @@
 /**
- * Gr8r brand mark — blue while idle/running, red while the timer is paused.
+ * Gr8r brand mark — blue only while the timer is running. Paused and stopped are red.
  */
 "use client";
 
 import { cn } from "@/lib/utils";
 
 type Props = {
-  paused?: boolean;
+  running?: boolean;
   className?: string;
   title?: string;
 };
 
-export function BrandLogo({ paused = false, className, title }: Props) {
-  const fill = paused ? "#DC2626" : "#2B7FFF";
+export function BrandLogo({ running = false, className, title }: Props) {
+  const fill = running ? "#2B7FFF" : "#DC2626";
 
   return (
     <svg

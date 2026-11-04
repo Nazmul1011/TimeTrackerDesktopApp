@@ -13,8 +13,12 @@ import { registerSyncIpc } from "./sync";
 import { registerTrackingIpc } from "./tracking";
 import { registerWindowIpc } from "./window";
 import { registerTrayIpc } from "../main/tray";
+import { installIpcSenderGuard } from "../security/ipc-sender-guard";
+import { getRendererOrigin } from "../main/renderer-origin";
 
 export function registerIpcHandlers(): void {
+  // Must run before any ipcMain.handle so every handler checks its sender.
+  installIpcSenderGuard(getRendererOrigin);
   registerAuthIpc();
   registerTimerIpc();
   registerScreenshotIpc();

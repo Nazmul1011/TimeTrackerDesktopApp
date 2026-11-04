@@ -4,6 +4,7 @@
 "use client";
 
 import { useCallback, useEffect } from "react";
+import { flushOfflineQueue, hasPendingTimerEvents, reopenServerSession } from "@/lib/offline-sync";
 import { dispatchTimerStopped } from "@/lib/timer-events";
 import { timerApi } from "@/services/api/timer.api";
 import type { ApiTimer } from "@/services/api/types";
@@ -17,18 +18,27 @@ export function useTimerSync(options?: { onFocus?: boolean; intervalMs?: number 
 
   const sync = useCallback(async () => {
     if (!isAuthenticated || !organizationId) return;
-    const apply = (apiTimer: ApiTimer | null) => {
-      const wasActive = useTimerStore.getState().timer.status !== "idle";
+    const apply = async (apiTimer: ApiTimer | null) => {
+      const status = useTimerStore.getState().timer.status;
+      const localActive = status === "running" || status === "paused";
+      if (await hasPendingTimerEvents()) {
+        await flushOfflineQueue();
+        return;
+      }
+      if (!apiTimer && localActive) {
+        await reopenServerSession();
+        return;
+      }
       hydrateFromApi(apiTimer);
       // Session ended on the server while we were away (sleep/offline): it is
       // now a saved entry, so reload today's total.
-      if (!apiTimer && wasActive) dispatchTimerStopped();
+      if (!apiTimer && localActive) dispatchTimerStopped();
     };
     try {
-      apply(await timerApi.sync());
+      await apply(await timerApi.sync());
     } catch {
       try {
-        apply(await timerApi.current());
+        await apply(await timerApi.current());
       } catch {
         // keep local state
       }

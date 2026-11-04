@@ -6,10 +6,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useOrgTimezone } from "@/hooks/useOrgTimezone";
-import { todayInZone } from "@/lib/org-date";
+import { todayInZone, ymdInZone } from "@/lib/org-date";
+import { addQueuedAppUsage, loadOfflineOverlay, type AppUsageRow } from "@/lib/offline-overlay";
+import { readCachedView, writeCachedView } from "@/lib/view-cache";
+import { CONNECTION_RESTORED_EVENT } from "@/store/connection.store";
 import { ACTIVITY_FLUSHED_EVENT } from "@/hooks/useTrackingAgent";
 import { TIMER_STOPPED_EVENT } from "@/lib/timer-events";
 import { isPageHidden, onPageVisible } from "@/lib/visibility";
+import { isOfflineError } from "@/lib/offline-error";
 import { activityApi } from "@/services/api/activity.api";
 import { getElectronAPI, isElectron } from "@/services/electron";
 import { useAuthStore } from "@/store/auth.store";
@@ -23,6 +27,8 @@ export type TopAppChip = {
   icon: string | null;
   totalDuration: number;
 };
+
+const TOP_APPS_CACHE = "topApps";
 
 async function resolveIcons(appNames: string[]): Promise<Record<string, string | null>> {
   if (!isElectron()) return {};
@@ -44,6 +50,9 @@ export function useTopApps() {
   const [apps, setApps] = useState<TopAppChip[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [offline, setOffline] = useState(false);
+  // Set while the chips on screen are the saved copy.
+  const [savedAt, setSavedAt] = useState<number | null>(null);
 
   const reload = useCallback(
     async (opts?: { silent?: boolean }) => {
@@ -59,18 +68,45 @@ export function useTopApps() {
 
       if (!opts?.silent) setIsLoading(true);
       setError(null);
+      setOffline(false);
 
       // Today only — same calendar day as the main timer (org timezone).
       const today = todayInZone(orgTimezone);
 
+      let rows: AppUsageRow[];
+      let copySavedAt: number | null = null;
       try {
-        const rows = await activityApi.getApps({
-          startDate: today,
-          endDate: today,
-          excludeIdle: true,
-        });
+        try {
+          const fresh = await activityApi.getApps({
+            startDate: today,
+            endDate: today,
+            excludeIdle: true,
+          });
+          rows = fresh.map(({ appName, totalDuration, percent }) => ({
+            appName,
+            totalDuration,
+            percent,
+          }));
+          if (!isStale()) writeCachedView(TOP_APPS_CACHE, today, rows);
+        } catch (err) {
+          // Offline: today's apps as last loaded. Other errors are shown.
+          const saved = isOfflineError(err)
+            ? readCachedView<AppUsageRow[]>(TOP_APPS_CACHE, today)
+            : null;
+          if (!saved) throw err;
+          rows = saved.data;
+          copySavedAt = saved.savedAt;
+          setOffline(true);
+        }
+
+        // App usage recorded offline is still in the upload queue.
+        const queued = (await loadOfflineOverlay(undefined, { activity: true })).activity.filter(
+          (row) => ymdInZone(new Date(row.start), orgTimezone) === today,
+        );
+        rows = addQueuedAppUsage(rows, queued);
 
         if (isStale()) return;
+        setSavedAt(copySavedAt);
 
         const osIcons = await resolveIcons(rows.map((r) => r.appName));
 
@@ -86,6 +122,11 @@ export function useTopApps() {
         setApps(top);
       } catch (err) {
         if (isStale()) return;
+        if (isOfflineError(err)) {
+          setOffline(true);
+          setError(null);
+          return;
+        }
         const message =
           typeof err === "object" &&
           err !== null &&
@@ -108,6 +149,8 @@ export function useTopApps() {
   useEffect(() => {
     setApps([]);
     setError(null);
+    setOffline(false);
+    setSavedAt(null);
   }, [organizationId]);
 
   // Midnight (and org-day rollover) must drop yesterday's chips like the clock.
@@ -125,9 +168,11 @@ export function useTopApps() {
     };
     window.addEventListener(TIMER_STOPPED_EVENT, onStopped);
     window.addEventListener(ACTIVITY_FLUSHED_EVENT, onFlushed);
+    window.addEventListener(CONNECTION_RESTORED_EVENT, onStopped);
     return () => {
       window.removeEventListener(TIMER_STOPPED_EVENT, onStopped);
       window.removeEventListener(ACTIVITY_FLUSHED_EVENT, onFlushed);
+      window.removeEventListener(CONNECTION_RESTORED_EVENT, onStopped);
     };
   }, [reload]);
 
@@ -146,5 +191,5 @@ export function useTopApps() {
     };
   }, [isAuthenticated, organizationId, reload]);
 
-  return { apps, isLoading, error, reload };
+  return { apps, isLoading, error, offline, savedAt, reload };
 }

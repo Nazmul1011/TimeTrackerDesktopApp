@@ -7,7 +7,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { ROUTES } from "@/constants/routes";
 import { signOutSession } from "@/lib/session";
-import { pauseTimer, resumeTimer, stopTimer } from "@/lib/timer-actions";
+import { pauseTimer, resumeTimer, stopTimer, whenTimerUploadsFinish } from "@/lib/timer-actions";
 import { getElectronAPI, isElectron } from "@/services/electron";
 import { useAuthStore } from "@/store/auth.store";
 import { useTimerStore } from "@/store/timer.store";
@@ -49,6 +49,7 @@ export function useTrayMenu() {
         void (async () => {
           try {
             await stopTimer({ silent: true });
+            await whenTimerUploadsFinish();
           } finally {
             const api = getElectronAPI();
             if (api?.app?.exit) {

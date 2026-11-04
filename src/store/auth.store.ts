@@ -6,6 +6,7 @@
  */
 import { create } from "zustand";
 import { STORAGE_KEYS } from "@/constants/storage";
+import { clearViewCache } from "@/lib/view-cache";
 import { ensureDeviceId } from "@/services/api/client";
 import type { OrganizationWithMembership } from "@/services/api/types";
 import { getElectronAPI, isElectron } from "@/services/electron";
@@ -337,6 +338,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     writeOptional(STORAGE_KEYS.ORGANIZATION_ID, null);
     writeJson(STORAGE_KEYS.AUTH_USER, null);
     writeJson(STORAGE_KEYS.AUTH_ORGANIZATIONS, null);
+    // Saved screens hold private data (screenshots, app names): gone on logout.
+    clearViewCache();
     clearElectronSession();
     set({
       user: null,

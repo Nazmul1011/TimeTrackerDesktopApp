@@ -4,6 +4,7 @@
  */
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
 import { AUTH_EVENTS, STORAGE_KEYS } from "@/constants/storage";
+import { useConnectionStore } from "@/store/connection.store";
 import type { ApiResponse, AuthTokens } from "./types";
 
 const baseURL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001";
@@ -204,9 +205,33 @@ export async function getFreshAccessToken(): Promise<string | null> {
   return result.status === "ok" ? result.accessToken : null;
 }
 
+/** 502/503/504 come from the proxy in front of the API: the server itself is not answering. */
+function serverUnreachable(status: number | undefined): boolean {
+  return status === 502 || status === 503 || status === 504;
+}
+
+/** Tells the connection store what this reply says about reaching the server. */
+function reportReachability(error: AxiosError | null): void {
+  const connection = useConnectionStore.getState();
+  if (!error) {
+    connection.markOnline();
+    return;
+  }
+  if (axios.isCancel(error) || error.code === "ERR_CANCELED") return;
+  if (!error.response || serverUnreachable(error.response.status)) {
+    connection.markOffline();
+    return;
+  }
+  connection.markOnline();
+}
+
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    reportReachability(null);
+    return response;
+  },
   async (error: AxiosError) => {
+    reportReachability(error);
     const originalRequest = error.config as InternalAxiosRequestConfig & {
       _retry?: boolean;
     };

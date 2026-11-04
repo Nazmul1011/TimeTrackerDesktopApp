@@ -38,6 +38,8 @@ export interface Timer {
   taskId: string | null;
   description: string;
   startedAt: string | null;
+  /** Wall-clock time the open session was paused. Cleared while running. */
+  pausedAt?: string | null;
   elapsedMs: number;
 }
 
@@ -81,6 +83,8 @@ export interface Settings {
   idleTimeoutMinutes: number;
   autoStartOnLogin: boolean;
   notificationsEnabled: boolean;
+  /** When on, the Day strip can add, move, resize, and remove time. */
+  timelineEditEnabled: boolean;
 }
 
 /** Split backend `name` into first/last for UI that expects both. */

@@ -36,6 +36,7 @@ export const defaultSettings: Settings = {
   idleTimeoutMinutes: DEFAULT_IDLE_TIMEOUT_MINUTES,
   autoStartOnLogin: false,
   notificationsEnabled: true,
+  timelineEditEnabled: false,
 };
 
 function mergeSettings(partial: Partial<Settings>, base: Settings): Settings {
@@ -66,6 +67,10 @@ function mergeSettings(partial: Partial<Settings>, base: Settings): Settings {
       typeof partial.notificationsEnabled === "boolean"
         ? partial.notificationsEnabled
         : base.notificationsEnabled,
+    timelineEditEnabled:
+      typeof partial.timelineEditEnabled === "boolean"
+        ? partial.timelineEditEnabled
+        : base.timelineEditEnabled,
   };
 }
 

@@ -15,13 +15,23 @@ const eslintConfig = [
     ignores: [
       "node_modules/**",
       ".next/**",
+      "out/**",
       "dist-electron/**",
       "release/**",
       "public/**",
+      ".dev-runtime/**",
+      "coverage/**",
       "next-env.d.ts",
     ],
   },
   ...compat.extends("next/core-web-vitals", "next/typescript", "prettier"),
+  {
+    // Node build/launch scripts are CommonJS on purpose.
+    files: ["scripts/**/*.cjs", "dock-icon.js"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
   {
     rules: {
       "@typescript-eslint/no-unused-vars": [

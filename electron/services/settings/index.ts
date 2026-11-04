@@ -11,6 +11,7 @@ export type DesktopSettings = {
   idleTimeoutMinutes: number;
   autoStartOnLogin: boolean;
   notificationsEnabled: boolean;
+  timelineEditEnabled: boolean;
 };
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
@@ -19,6 +20,7 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   idleTimeoutMinutes: 2,
   autoStartOnLogin: false,
   notificationsEnabled: true,
+  timelineEditEnabled: false,
 };
 
 function isTheme(v: unknown): v is DesktopSettings["theme"] {
@@ -46,6 +48,7 @@ export function normalizeDesktopSettings(
         : DEFAULT_DESKTOP_SETTINGS.idleTimeoutMinutes,
     autoStartOnLogin: Boolean(merged.autoStartOnLogin),
     notificationsEnabled: merged.notificationsEnabled !== false,
+    timelineEditEnabled: merged.timelineEditEnabled === true,
   };
 }
 

@@ -6,14 +6,20 @@ import type { ApiResponse, ApiTimer } from "./types";
 import { isValidProjectId } from "@/lib/project";
 import { getUserTimezone } from "@/lib/org-date";
 
+/** Give up quickly so a dead server cannot hold Start or Stop. */
+const QUICK_TIMEOUT_MS = 4_000;
+const quick = { timeout: QUICK_TIMEOUT_MS };
+
 export type StartTimerPayload = {
   projectId?: string;
   description?: string;
   deviceId?: string;
+  occurredAt?: string;
 };
 
 export type StopTimerPayload = {
   description?: string;
+  occurredAt?: string;
 };
 
 export type DeviceTimerPayload = {
@@ -24,6 +30,20 @@ export type DeviceTimerPayload = {
    * lands at the right moment.
    */
   occurredAt?: string;
+};
+
+export type ReplayTimerEvent = {
+  kind: "start" | "pause" | "resume" | "stop";
+  occurredAt: string;
+  projectId?: string;
+  description?: string;
+  synthetic?: boolean;
+};
+
+export type ReplayTimerResult = {
+  applied: number;
+  open: boolean;
+  reopened: boolean;
 };
 
 export type StopTimerResult = {
@@ -38,34 +58,51 @@ export const timerApi = {
     const body: Record<string, string> = {
       deviceId: payload.deviceId ?? ensureDeviceId(),
     };
+    if (payload.occurredAt) body.occurredAt = payload.occurredAt;
     if (payload.description?.trim()) {
       body.description = payload.description.trim();
     }
     if (payload.projectId && isValidProjectId(payload.projectId)) {
       body.projectId = payload.projectId.trim();
     }
-    const { data } = await apiClient.post<ApiResponse<{ timer: ApiTimer }>>("/timer/start", body);
+    const { data } = await apiClient.post<ApiResponse<{ timer: ApiTimer }>>(
+      "/timer/start",
+      body,
+      quick,
+    );
     return data.data.timer;
   },
 
   async stop(payload: StopTimerPayload = {}) {
-    const { data } = await apiClient.post<ApiResponse<StopTimerResult>>("/timer/stop", payload);
+    const { data } = await apiClient.post<ApiResponse<StopTimerResult>>(
+      "/timer/stop",
+      payload,
+      quick,
+    );
     return data.data ?? { entries: [], count: 0, totalDurationSeconds: 0 };
   },
 
   async pause(payload: DeviceTimerPayload = {}) {
-    const { data } = await apiClient.post<ApiResponse<{ timer: ApiTimer }>>("/timer/pause", {
-      ...payload,
-      deviceId: payload.deviceId ?? ensureDeviceId(),
-    });
+    const { data } = await apiClient.post<ApiResponse<{ timer: ApiTimer }>>(
+      "/timer/pause",
+      {
+        ...payload,
+        deviceId: payload.deviceId ?? ensureDeviceId(),
+      },
+      quick,
+    );
     return data.data.timer;
   },
 
   async resume(payload: DeviceTimerPayload = {}) {
-    const { data } = await apiClient.post<ApiResponse<{ timer: ApiTimer }>>("/timer/resume", {
-      ...payload,
-      deviceId: payload.deviceId ?? ensureDeviceId(),
-    });
+    const { data } = await apiClient.post<ApiResponse<{ timer: ApiTimer }>>(
+      "/timer/resume",
+      {
+        ...payload,
+        deviceId: payload.deviceId ?? ensureDeviceId(),
+      },
+      quick,
+    );
     return data.data.timer;
   },
 
@@ -77,9 +114,28 @@ export const timerApi = {
     return data.data?.timer ?? null;
   },
 
+  async replay(body: {
+    sessionStartedAt: string;
+    complete: boolean;
+    deviceId?: string;
+    events: ReplayTimerEvent[];
+  }) {
+    const { data } = await apiClient.post<ApiResponse<ReplayTimerResult>>(
+      "/timer/replay",
+      {
+        ...body,
+        deviceId: body.deviceId ?? ensureDeviceId(),
+      },
+      quick,
+    );
+    return data.data;
+  },
+
   async current() {
-    const { data } =
-      await apiClient.get<ApiResponse<{ timer: ApiTimer } | ApiTimer | null>>("/timer/current");
+    const { data } = await apiClient.get<ApiResponse<{ timer: ApiTimer } | ApiTimer | null>>(
+      "/timer/current",
+      quick,
+    );
     const payload = data.data;
     if (!payload) return null;
     if ("timer" in payload && payload.timer) return payload.timer;

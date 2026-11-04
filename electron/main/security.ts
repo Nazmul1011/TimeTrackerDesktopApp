@@ -16,7 +16,8 @@ export function applySecurityDefaults(): void {
         }
         const allowed = process.env.ELECTRON_RENDERER_URL || "http://localhost:3000";
         const allowedOrigin = new URL(allowed).origin;
-        if (parsed.origin !== allowedOrigin && parsed.protocol !== "file:") {
+        // The app never loads file: pages; allowing them would give local HTML the preload API.
+        if (parsed.origin !== allowedOrigin) {
           log.warn("[security] Blocked navigation to", navigationUrl);
           event.preventDefault();
         }

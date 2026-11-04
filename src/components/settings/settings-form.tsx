@@ -1,5 +1,5 @@
 /**
- * Settings form — notifications, launch on login, org screenshot interval, theme.
+ * Settings form — notifications, timeline editing, launch on login, theme.
  */
 "use client";
 
@@ -84,6 +84,29 @@ export function SettingsForm() {
               "notifications",
               { notificationsEnabled: checked },
               checked ? "Notifications on" : "Notifications off",
+            );
+          }}
+        />
+      </div>
+      <Separator />
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <Label htmlFor="timeline-edit" className="text-xs">
+            Edit and delete timeline
+          </Label>
+          <p className="text-[11px] text-[var(--text-muted)]">
+            Add, move, or remove time on the Day strip
+          </p>
+        </div>
+        <Switch
+          id="timeline-edit"
+          disabled={busy === "timeline-edit"}
+          checked={settings.timelineEditEnabled}
+          onCheckedChange={(checked) => {
+            void update(
+              "timeline-edit",
+              { timelineEditEnabled: checked },
+              checked ? "Timeline editing on" : "Timeline editing off",
             );
           }}
         />

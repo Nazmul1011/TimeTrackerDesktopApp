@@ -1,6 +1,6 @@
 /**
  * SQLite database initialization via better-sqlite3.
- * No tables yet — connection only.
+ * The offline outbox tables are created in `outbox.ts`.
  *
  * better-sqlite3 is an optionalDependency because it requires a native build
  * (and electron-rebuild for the Electron runtime). If unavailable, the app
@@ -11,8 +11,16 @@ import { app } from "electron";
 import log from "electron-log/main";
 import fs from "fs";
 
-type SqliteDatabase = {
+export type SqliteStatement = {
+  run: (...params: unknown[]) => { changes: number; lastInsertRowid: number | bigint };
+  get: (...params: unknown[]) => unknown;
+  all: (...params: unknown[]) => unknown[];
+};
+
+export type SqliteDatabase = {
   pragma: (source: string) => unknown;
+  exec: (sql: string) => void;
+  prepare: (sql: string) => SqliteStatement;
   close: () => void;
 };
 
@@ -34,6 +42,12 @@ function loadBetterSqlite3(): BetterSqlite3 | null {
   }
 }
 
+/** Offline queue lives on the drive the app is running from, not the Windows profile. */
+export function offlineDataDir(): string {
+  const drive = path.parse(app.getAppPath()).root;
+  return path.join(drive, "Gr8rTimeTracker", "data");
+}
+
 export function initDatabase(): SqliteDatabase | null {
   if (db) return db;
 
@@ -41,8 +55,7 @@ export function initDatabase(): SqliteDatabase | null {
   if (!Database) return null;
 
   try {
-    const userDataPath = app.getPath("userData");
-    const dbDir = path.join(userDataPath, "data");
+    const dbDir = offlineDataDir();
 
     if (!fs.existsSync(dbDir)) {
       fs.mkdirSync(dbDir, { recursive: true });
@@ -54,7 +67,6 @@ export function initDatabase(): SqliteDatabase | null {
     db.pragma("foreign_keys = ON");
 
     log.info(`[sqlite] Database opened at ${dbPath}`);
-    // Tables will be created in future migrations — none yet.
     return db;
   } catch (error) {
     log.warn("[sqlite] Failed to open database", error);

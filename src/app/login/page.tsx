@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ROUTES } from "@/constants/routes";
+import { isOfflineError } from "@/lib/offline-error";
 import { authApi } from "@/services/api/auth.api";
 import { orgApi } from "@/services/api/org.api";
 import type { OrganizationWithMembership } from "@/services/api/types";
@@ -23,6 +24,7 @@ import { connectRealtime } from "@/services/realtime/socket";
 import { useAuthStore } from "@/store/auth.store";
 import { mapApiUserToUser } from "@/types";
 import { toast } from "sonner";
+import { Eye, EyeOff } from "lucide-react";
 
 function getErrorMessage(err: unknown, fallback: string): string {
   if (typeof err === "object" && err !== null && "response" in err) {
@@ -42,6 +44,7 @@ export default function LoginPage() {
   const organizationId = useAuthStore((s) => s.organizationId);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [pendingOrgs, setPendingOrgs] = useState<OrganizationWithMembership[] | null>(null);
   const [selectedOrgId, setSelectedOrgId] = useState<string>("");
@@ -134,7 +137,11 @@ export default function LoginPage() {
       setSelectedOrgId(organizations[0].id);
       toast.message("Select an organization to continue");
     } catch (err) {
-      toast.error(getErrorMessage(err, "Sign in failed"));
+      toast.error(
+        isOfflineError(err)
+          ? "You're offline. Connect to the internet to sign in."
+          : getErrorMessage(err, "Sign in failed"),
+      );
     } finally {
       setLoading(false);
     }
@@ -183,16 +190,27 @@ export default function LoginPage() {
               >
                 Password
               </Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                autoComplete="current-password"
-                placeholder="Enter your password"
-                className="text-[#1e2939] dark:text-[#f1f5f9]"
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  autoComplete="current-password"
+                  placeholder="Enter your password"
+                  className="pr-10 text-[#1e2939] dark:text-[#f1f5f9]"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                  className="absolute inset-y-0 right-0 flex w-10 items-center justify-center rounded-r-md text-[#6a7282] transition-colors hover:text-[#1e2939] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-[#94a3b8] dark:hover:text-[#f1f5f9]"
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
             </div>
           </>
         ) : (

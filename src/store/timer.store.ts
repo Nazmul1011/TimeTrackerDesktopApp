@@ -5,7 +5,7 @@
  */
 import { create } from "zustand";
 import type { ApiTimer } from "@/services/api/types";
-import { getOrgTimezone, getUserTimezone, todayInUserZone, todayInZone } from "@/lib/org-date";
+import { getUserTimezone, todayInUserZone } from "@/lib/org-date";
 import { timerApi } from "@/services/api/timer.api";
 import { sanitizeProjectId } from "@/lib/project";
 import { dispatchTimerStopped } from "@/lib/timer-events";
@@ -99,6 +99,7 @@ function mapApiTimer(apiTimer: ApiTimer): {
       taskId: null,
       description: apiTimer.description ?? "",
       startedAt: apiTimer.startTime ?? null,
+      pausedAt: status === "paused" ? (apiTimer.pausedAt ?? null) : null,
       elapsedMs,
     },
     baseElapsedMs: elapsedMs,
@@ -146,6 +147,10 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   applyElapsedSeconds: (elapsedSeconds, status, partial) => {
     const elapsedMs = Math.max(0, elapsedSeconds * 1000);
     const { timer } = get();
+    const pausedAt =
+      status === "paused"
+        ? (partial?.pausedAt ?? timer.pausedAt ?? new Date().toISOString())
+        : null;
     set({
       baseElapsedMs: elapsedMs,
       segmentStartedAt: status === "running" ? Date.now() : null,
@@ -154,6 +159,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
         ...partial,
         status,
         elapsedMs,
+        pausedAt,
       },
     });
   },

@@ -13,6 +13,9 @@ import { STORAGE_KEYS } from "@/constants/storage";
 import { normalizeAppName } from "@/lib/app-name";
 import { notifyToast } from "@/lib/notify";
 import { handleIdlePause, handleIdleResume } from "@/lib/idle-timer-sync";
+import { clearIdlePaused, isIdlePaused } from "@/lib/idle-pause-state";
+import { enqueueActivityBatch } from "@/lib/offline-sync";
+import { isRetryableError } from "@/lib/timer-outbox";
 import { getElectronAPI, isElectron } from "@/services/electron";
 import { useAuthStore } from "@/store/auth.store";
 import { useSettingsStore } from "@/store/settings.store";
@@ -32,6 +35,9 @@ const FLUSH_MS = 30_000;
 const FIRST_SCREENSHOT_MS = 3_000;
 const TOKEN_REFRESH_MS = 8 * 60_000;
 const CONFIG_POLL_MS = 30_000;
+const IDLE_REARM_CHECK_MS = 60_000;
+const IDLE_REARM_RETRY_MS = 3_000;
+const IDLE_FLAG_CLEAR_AFTER_RUNNING_MS = 30_000;
 
 export const SCREENSHOT_CAPTURED_EVENT = "gr8r:screenshot-captured";
 /** Fired after a successful activity upload so Top Apps can refetch. */
@@ -120,7 +126,7 @@ export function useTrackingAgent() {
     });
 
     const unsubResume = api.tracking.onIdleResume((payload) => {
-      handleIdleResume(payload?.resumedAt);
+      void handleIdleResume(payload?.resumedAt);
     });
 
     return () => {
@@ -139,17 +145,47 @@ export function useTrackingAgent() {
     prevTimerStatusRef.current = timerStatus;
 
     if (!isAuthenticated) {
-      void getElectronAPI()?.tracking.disarmIdleResume?.();
+      clearIdlePaused();
+      void getElectronAPI()?.tracking.disarmIdleResume?.("logged out");
       return;
     }
     if (timerStatus === "paused") return;
     if (timerStatus === "running") {
       if (prev === "paused") {
-        void getElectronAPI()?.tracking.disarmIdleResume?.();
+        void getElectronAPI()?.tracking.disarmIdleResume?.("window timer is running");
       }
       return;
     }
-    void getElectronAPI()?.tracking.disarmIdleResume?.();
+    void getElectronAPI()?.tracking.disarmIdleResume?.(`window timer is ${timerStatus}`);
+  }, [timerStatus, isAuthenticated]);
+
+  // Safety net: while the window shows an idle pause, keep the main-process
+  // watcher on. A server sync can flip the status to running for a moment
+  // (which turns the watcher off); this turns it back on, and re-checks every
+  // minute. Main does nothing if the watcher is already on.
+  useEffect(() => {
+    if (!isAuthenticated || !isElectron()) return;
+
+    if (timerStatus === "running") {
+      // Running for a while means a real resume (e.g. from the web app), not
+      // a brief flip, so a later pause from elsewhere must not auto-resume.
+      const id = window.setTimeout(clearIdlePaused, IDLE_FLAG_CLEAR_AFTER_RUNNING_MS);
+      return () => window.clearTimeout(id);
+    }
+    if (timerStatus !== "paused") return;
+
+    const arm = () => {
+      if (useTimerStore.getState().timer.status !== "paused" || !isIdlePaused()) return;
+      void getElectronAPI()?.tracking.armIdleResume?.("window still shows an idle pause");
+    };
+    arm();
+    // Main ignores the first try while a stop from the flip is still settling (~2s).
+    const soonId = window.setTimeout(arm, IDLE_REARM_RETRY_MS);
+    const id = window.setInterval(arm, IDLE_REARM_CHECK_MS);
+    return () => {
+      window.clearTimeout(soonId);
+      window.clearInterval(id);
+    };
   }, [timerStatus, isAuthenticated]);
 
   // Keep access tokens fresh — JWT expires in 15m and main-process uploads
@@ -350,8 +386,11 @@ export function useTrackingAgent() {
           if (batch.some((sample) => !sample.isIdle)) {
             dispatchActivityFlushed();
           }
-        } catch {
-          queueRef.current = [...batch, ...queueRef.current].slice(0, 200);
+        } catch (err) {
+          const queued = isRetryableError(err) && (await enqueueActivityBatch(batch));
+          if (!queued) {
+            queueRef.current = [...batch, ...queueRef.current].slice(0, 200);
+          }
         }
       })().finally(() => {
         flushInFlight = null;

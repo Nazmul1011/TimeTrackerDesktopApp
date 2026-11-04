@@ -8,8 +8,13 @@ import { useOrgTimezone } from "@/hooks/useOrgTimezone";
 import { monthEndYmd, monthStartYmd, todayInZone, weekEndYmd, weekStartYmd } from "@/lib/org-date";
 import { TIMER_STOPPED_EVENT } from "@/lib/timer-events";
 import { isPageHidden, onPageVisible } from "@/lib/visibility";
+import { isOfflineError } from "@/lib/offline-error";
 import { reportsApi } from "@/services/api/reports.api";
 import { useAuthStore } from "@/store/auth.store";
+import { CONNECTION_RESTORED_EVENT } from "@/store/connection.store";
+import { listOfflineSessions, offlineSecondsOn } from "@/lib/offline-time";
+import { todayInUserZone } from "@/lib/org-date";
+import { readCachedView, writeCachedView } from "@/lib/view-cache";
 
 export type PeriodSummary = {
   title: string;
@@ -40,6 +45,21 @@ function emptyStats(): SummaryStats {
   };
 }
 
+const SUMMARY_CACHE = "summary";
+
+/** Hours stopped offline today: in this week and month, not on the server yet. */
+async function offlineHoursToday(): Promise<number> {
+  return offlineSecondsOn(await listOfflineSessions(), todayInUserZone()) / 3600;
+}
+
+function withExtraHours(stats: SummaryStats, hours: number): SummaryStats {
+  if (hours <= 0) return stats;
+  return {
+    month: { ...stats.month, loggedHours: stats.month.loggedHours + hours },
+    week: { ...stats.week, loggedHours: stats.week.loggedHours + hours },
+  };
+}
+
 /** `17h 29m` — hours and leftover minutes (not rounded away). */
 export function formatSummaryHours(hours: number): string {
   const totalMinutes = Math.max(0, Math.round(hours * 60));
@@ -56,6 +76,9 @@ export function useSummaryStats() {
   const [stats, setStats] = useState<SummaryStats>(emptyStats);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [offline, setOffline] = useState(false);
+  // Set while the numbers on screen are the saved copy.
+  const [savedAt, setSavedAt] = useState<number | null>(null);
 
   const reload = useCallback(async () => {
     if (!isAuthenticated || !organizationId) {
@@ -70,6 +93,7 @@ export function useSummaryStats() {
 
     setIsLoading(true);
     setError(null);
+    setOffline(false);
 
     // Ranges follow the org's calendar, matching how the backend stores days.
     const timeZone = orgTimezone;
@@ -78,6 +102,7 @@ export function useSummaryStats() {
     const monthEnd = monthEndYmd(timeZone);
     const weekStart = weekStartYmd(timeZone);
     const weekEnd = weekEndYmd(timeZone);
+    const cacheParam = `${monthStart}:${weekStart}:${today}`;
 
     try {
       const [monthSoFar, monthGoal, weekSoFar, weekGoal] = await Promise.all([
@@ -89,7 +114,7 @@ export function useSummaryStats() {
 
       if (isStale()) return;
 
-      setStats({
+      const fresh: SummaryStats = {
         month: {
           title: "This Month",
           loggedHours: monthSoFar.totalLoggedHours,
@@ -102,9 +127,27 @@ export function useSummaryStats() {
           goalHours: weekGoal.expectedHours,
           expectedSoFarHours: weekSoFar.expectedHours,
         },
-      });
+      };
+      writeCachedView(SUMMARY_CACHE, cacheParam, fresh);
+      const extra = await offlineHoursToday();
+      if (isStale()) return;
+      setSavedAt(null);
+      setStats(withExtraHours(fresh, extra));
     } catch (err) {
       if (isStale()) return;
+      if (isOfflineError(err)) {
+        setOffline(true);
+        setError(null);
+        // Show this week and month as last loaded, plus time tracked offline.
+        const saved = readCachedView<SummaryStats>(SUMMARY_CACHE, cacheParam);
+        if (saved) {
+          const extra = await offlineHoursToday();
+          if (isStale()) return;
+          setStats(withExtraHours(saved.data, extra));
+          setSavedAt(saved.savedAt);
+        }
+        return;
+      }
       // Never leave the previous org's hours on screen behind an error.
       setStats(emptyStats());
       const message =
@@ -127,6 +170,8 @@ export function useSummaryStats() {
   useEffect(() => {
     setStats(emptyStats());
     setError(null);
+    setOffline(false);
+    setSavedAt(null);
   }, [organizationId]);
 
   useEffect(() => {
@@ -138,7 +183,11 @@ export function useSummaryStats() {
       void reload();
     };
     window.addEventListener(TIMER_STOPPED_EVENT, onStopped);
-    return () => window.removeEventListener(TIMER_STOPPED_EVENT, onStopped);
+    window.addEventListener(CONNECTION_RESTORED_EVENT, onStopped);
+    return () => {
+      window.removeEventListener(TIMER_STOPPED_EVENT, onStopped);
+      window.removeEventListener(CONNECTION_RESTORED_EVENT, onStopped);
+    };
   }, [reload]);
 
   // Light refresh while the app is open (new entries / remote sync)
@@ -155,5 +204,5 @@ export function useSummaryStats() {
     };
   }, [isAuthenticated, organizationId, reload]);
 
-  return { stats, isLoading, error, reload };
+  return { stats, isLoading, error, offline, savedAt, reload };
 }

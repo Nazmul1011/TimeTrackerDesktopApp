@@ -61,7 +61,8 @@ const electronAPI = {
       ipcRenderer.on("tracking:idle-resume", listener);
       return () => ipcRenderer.removeListener("tracking:idle-resume", listener);
     },
-    disarmIdleResume: () => ipcRenderer.invoke("tracking:disarmIdleResume"),
+    disarmIdleResume: (reason?: string) => ipcRenderer.invoke("tracking:disarmIdleResume", reason),
+    armIdleResume: (reason?: string) => ipcRenderer.invoke("tracking:armIdleResume", reason),
     openScreenRecording: () => ipcRenderer.invoke("tracking:openScreenRecording"),
     retryScreenshots: () => ipcRenderer.invoke("tracking:retryScreenshots"),
   },
@@ -70,6 +71,7 @@ const electronAPI = {
     getIdleState: (thresholdSeconds?: number) =>
       ipcRenderer.invoke("activity:getIdleState", thresholdSeconds),
     getActiveWindow: () => ipcRenderer.invoke("activity:getActiveWindow"),
+    takeInputScore: () => ipcRenderer.invoke("activity:takeInputScore"),
     getAppIcon: (appName: string) => ipcRenderer.invoke("activity:getAppIcon", appName),
     getAppIcons: (appNames: string[]) => ipcRenderer.invoke("activity:getAppIcons", appNames),
     getSummary: () => ipcRenderer.invoke("activity:getSummary"),
@@ -95,10 +97,17 @@ const electronAPI = {
     setTimerStatus: (status: "idle" | "running" | "paused") =>
       ipcRenderer.invoke("window:setTimerStatus", status),
   },
-  // Sync
+  // Sync / offline outbox
   sync: {
-    run: () => ipcRenderer.invoke("sync:run"),
-    getStatus: () => ipcRenderer.invoke("sync:getStatus"),
+    enqueue: (body: { kind: string; payload: unknown }) => ipcRenderer.invoke("sync:enqueue", body),
+    list: (kind?: string) => ipcRenderer.invoke("sync:list", kind),
+    ack: (ids: number[]) => ipcRenderer.invoke("sync:ack", ids),
+    clear: (kind: string) => ipcRenderer.invoke("sync:clear", kind),
+    getBootId: () => ipcRenderer.invoke("sync:getBootId"),
+    getSession: (organizationId: string) => ipcRenderer.invoke("sync:getSession", organizationId),
+    saveSession: (session: unknown) => ipcRenderer.invoke("sync:saveSession", session),
+    flushScreenshots: () => ipcRenderer.invoke("sync:flushScreenshots"),
+    pendingScreenshots: () => ipcRenderer.invoke("sync:pendingScreenshots"),
   },
   tray: {
     setState: (payload: unknown) => ipcRenderer.invoke("tray:setState", payload),

@@ -4,6 +4,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { NotificationListSkeleton } from "@/components/layout/section-skeletons";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BrandLogo } from "@/components/brand/brand-logo";
@@ -29,7 +30,9 @@ const headerIconClass =
 
 export function Header() {
   const router = useRouter();
-  const isPaused = useTimerStore((s) => s.timer.status === "paused");
+  const timerStatus = useTimerStore((s) => s.timer.status);
+  const isRunning = timerStatus === "running";
+  const isPaused = timerStatus === "paused";
   const { notifications, unreadCount, isLoading, error, loadNotifications, markAsRead } =
     useNotifications({ poll: true });
   const { navigateFromNotification } = useNotificationNavigation();
@@ -49,9 +52,12 @@ export function Header() {
         <Link
           href={ROUTES.HOME}
           className="relative size-8 shrink-0 overflow-hidden rounded-lg outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35"
-          title={isPaused ? "Timer paused" : "Gr8r"}
+          title={isRunning ? "Gr8r" : isPaused ? "Timer paused" : "Timer stopped"}
         >
-          <BrandLogo paused={isPaused} title={isPaused ? "Timer paused" : "Gr8r"} />
+          <BrandLogo
+            running={isRunning}
+            title={isRunning ? "Gr8r" : isPaused ? "Timer paused" : "Timer stopped"}
+          />
         </Link>
         <WorkspaceSelector />
       </div>
@@ -89,9 +95,7 @@ export function Header() {
             className="scrollbar-hide max-h-[360px] w-[281px] min-w-[281px] overflow-y-auto overflow-x-hidden rounded-xl border border-[#e6e6e6] bg-white p-0 shadow-[0_1px_1px_rgba(0,0,0,0.03),0_4px_2px_rgba(0,0,0,0.03),0_9px_2.5px_rgba(0,0,0,0.02)] dark:border-[#334155] dark:bg-card"
           >
             {isLoading && notifications.length === 0 ? (
-              <div className="px-3 py-6 text-center text-xs text-[#99a1af] dark:text-[#64748b]">
-                Loading…
-              </div>
+              <NotificationListSkeleton rows={3} />
             ) : error && notifications.length === 0 ? (
               <div className="flex flex-col items-center gap-2 px-3 py-6">
                 <p className="text-center text-xs text-[#99a1af] dark:text-[#64748b]">{error}</p>

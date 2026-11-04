@@ -6,15 +6,15 @@ Part of the Gr8r monorepo alongside `TimeTrackerBackend` (API, ~3001) and `TimeT
 
 ## Tech Stack
 
-| Layer | Technology |
-| --- | --- |
-| Desktop shell | Electron |
-| UI | Next.js (App Router), React, TypeScript |
-| Styling | TailwindCSS, shadcn/ui |
-| State | Zustand |
-| API | Axios → NestJS backend |
-| Local DB | better-sqlite3 (optional, Electron main process) |
-| Packaging | electron-builder, electron-updater |
+| Layer         | Technology                                       |
+| ------------- | ------------------------------------------------ |
+| Desktop shell | Electron                                         |
+| UI            | Next.js (App Router), React, TypeScript          |
+| Styling       | TailwindCSS, shadcn/ui                           |
+| State         | Zustand                                          |
+| API           | Axios → NestJS backend                           |
+| Local DB      | better-sqlite3 (optional, Electron main process) |
+| Packaging     | electron-builder, electron-updater               |
 
 ## Getting Started
 
@@ -27,7 +27,7 @@ Part of the Gr8r monorepo alongside `TimeTrackerBackend` (API, ~3001) and `TimeT
 
 ```bash
 cd TimeTrackerDesktopApp
-cp .env.example .env   # set NEXT_PUBLIC_API_URL=http://localhost:3001
+cp .env.example .env   # set NEXT_PUBLIC_API_BASE_URL=http://localhost:3001
 npm install
 npm run dev
 ```
@@ -38,15 +38,15 @@ This starts Next.js and opens the **Electron window** (~446×640). Activity trac
 
 ### Scripts
 
-| Script | Description |
-| --- | --- |
-| `npm run dev` / `npm start` | Desktop app — Next.js + Electron |
-| `npm run dev:web` | Renderer only (browser debugging) |
-| `npm run electron:dev` | Same as `dev` |
-| `npm run build` | Build Next.js renderer |
-| `npm run electron:build` | Package desktop installers |
-| `npm run lint` | ESLint |
-| `npm run typecheck` | TypeScript (renderer + Electron) |
+| Script                      | Description                       |
+| --------------------------- | --------------------------------- |
+| `npm run dev` / `npm start` | Desktop app — Next.js + Electron  |
+| `npm run dev:web`           | Renderer only (browser debugging) |
+| `npm run electron:dev`      | Same as `dev`                     |
+| `npm run build`             | Build Next.js renderer            |
+| `npm run electron:build`    | Package desktop installers        |
+| `npm run lint`              | ESLint                            |
+| `npm run typecheck`         | TypeScript (renderer + Electron)  |
 
 ## Architecture
 
@@ -71,19 +71,19 @@ TimeTrackerDesktopApp/
 
 ### Routes
 
-| Path | Purpose |
-| --- | --- |
-| `/login` | Authentication |
-| `/home` | Timer + Summary / Timesheet / Screenshots tabs |
-| `/profile` | View and edit profile |
-| `/settings` | Preferences |
-| `/notifications` | Inbox + admin screenshot deletion review |
+| Path             | Purpose                                        |
+| ---------------- | ---------------------------------------------- |
+| `/login`         | Authentication                                 |
+| `/home`          | Timer + Summary / Timesheet / Screenshots tabs |
+| `/profile`       | View and edit profile                          |
+| `/settings`      | Preferences                                    |
+| `/notifications` | Inbox + admin screenshot deletion review       |
 
 ## Environment
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:3001` | Backend API base URL |
+| Variable                   | Default                 | Description          |
+| -------------------------- | ----------------------- | -------------------- |
+| `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:3001` | Backend API base URL |
 
 ## License
 

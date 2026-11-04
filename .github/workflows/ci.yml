@@ -1,0 +1,47 @@
+# Checks every push and pull request: types, lint, tests, and that the
+# renderer still builds. Runs on Windows because that is the main platform
+# and the native SQLite module must be built for Electron there.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      HUSKY: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Tests run under Electron's Node (scripts/run-tests.cjs), so
+      # better-sqlite3 must be the Electron build, not the plain Node one.
+      - name: Build native modules for Electron
+        run: npx electron-builder install-app-deps
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build renderer
+        run: npm run build

@@ -6,6 +6,7 @@ import log from "electron-log/main";
 import { ActivityService } from "../services/activity";
 import { AppIconService } from "../services/app-icon";
 import { IdleService } from "../services/idle";
+import { InputActivityMonitor } from "../services/input-activity";
 
 export function registerActivityIpc(): void {
   const activity = ActivityService.getInstance();
@@ -14,6 +15,10 @@ export function registerActivityIpc(): void {
 
   ipcMain.handle("activity:getIdleState", async (_event, thresholdSeconds?: number) => {
     return idle.getIdleState(typeof thresholdSeconds === "number" ? thresholdSeconds : 120);
+  });
+
+  ipcMain.handle("activity:takeInputScore", async () => {
+    return { activityPercent: InputActivityMonitor.getInstance().takeSamplePercent() };
   });
 
   ipcMain.handle("activity:getActiveWindow", async () => {

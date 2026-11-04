@@ -5,7 +5,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
 import { useOrgTimezone } from "@/hooks/useOrgTimezone";
 import { formatElapsed } from "@/lib/dayjs";
 import { TIMER_STOPPED_EVENT, dispatchTimerStopped } from "@/lib/timer-events";
@@ -13,28 +12,25 @@ import {
   pauseTimer,
   resetDayTimer,
   resumeTimer,
-  runTimerMutation,
   selectProject,
+  startTimer,
   stopTimer,
 } from "@/lib/timer-actions";
+import { rememberTimerSession, reopenServerSession } from "@/lib/offline-sync";
+import { listOfflineSessions, offlineSecondsOn } from "@/lib/offline-time";
+import { todayInUserZone } from "@/lib/org-date";
+import { readCachedView, writeCachedView } from "@/lib/view-cache";
 import { timerApi } from "@/services/api/timer.api";
 import { timesheetApi } from "@/services/api/timesheet.api";
-import { sanitizeProjectId } from "@/lib/project";
-import { cancelWindowReveal } from "@/lib/window-reveal";
+import { isElectron } from "@/services/electron";
 import { useAuthStore } from "@/store/auth.store";
+import { CONNECTION_RESTORED_EVENT } from "@/store/connection.store";
 import { useTimerStore } from "@/store/timer.store";
 
 /** Fallback only: realtime events push timer changes as they happen. */
 const TIMER_POLL_MS = 30_000;
-
-function getErrorMessage(err: unknown, fallback: string): string {
-  if (typeof err === "object" && err !== null && "response" in err) {
-    const response = (err as { response?: { data?: { message?: string } } }).response;
-    if (response?.data?.message) return response.data.message;
-  }
-  if (err instanceof Error && err.message) return err.message;
-  return fallback;
-}
+/** Saved copy of the server's total for one day (key: that day). */
+const TODAY_TOTAL_CACHE = "todayTotal";
 
 export function useTimer(options?: { hydrateOnMount?: boolean }) {
   const hydrateOnMount = options?.hydrateOnMount ?? false;
@@ -64,18 +60,38 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
   const todayTotalLoadedRef = useRef(false);
   const [, forceRender] = useState(0);
 
+  // True once today's total came from the server or its saved copy, so the
+  // saved copy never overwrites a number this run already has.
+  const todayTotalShownRef = useRef(false);
+
   const refreshTodayTotal = useCallback(async () => {
     if (!isAuthenticated || !organizationId) return;
     const requestedOrg = organizationId;
+    const day = todayInUserZone();
     try {
       const seconds = await timesheetApi.getTodayLoggedSeconds(orgTimezone);
       // A total for the org we just left must not land on the new one.
       if (useAuthStore.getState().organizationId !== requestedOrg) return;
-      setTodayLoggedSeconds(seconds);
+      writeCachedView(TODAY_TOTAL_CACHE, day, seconds);
+      // Sessions stopped offline are not in the server's total yet.
+      const offline = offlineSecondsOn(await listOfflineSessions(), day);
+      if (useAuthStore.getState().organizationId !== requestedOrg) return;
+      setTodayLoggedSeconds(seconds + offline);
       todayTotalLoadedRef.current = true;
+      todayTotalShownRef.current = true;
     } catch {
-      // keep previous total; the poll retries
+      // Keep the previous total; the poll retries. On an offline start the
+      // clock would read 00:00:00, so show the saved total instead.
       todayTotalLoadedRef.current = false;
+      if (todayTotalShownRef.current) return;
+      const cached = readCachedView<number>(TODAY_TOTAL_CACHE, day);
+      if (typeof cached?.data !== "number") return;
+      const offline = offlineSecondsOn(await listOfflineSessions(), day);
+      if (useAuthStore.getState().organizationId !== requestedOrg || todayTotalShownRef.current) {
+        return;
+      }
+      setTodayLoggedSeconds(cached.data + offline);
+      todayTotalShownRef.current = true;
     }
   }, [isAuthenticated, organizationId, orgTimezone, setTodayLoggedSeconds]);
 
@@ -99,6 +115,7 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
     if (loadedOrgRef.current === organizationId) return;
     loadedOrgRef.current = organizationId;
     todayTotalLoadedRef.current = false;
+    todayTotalShownRef.current = false;
     reset();
   }, [organizationId, reset]);
 
@@ -133,10 +150,14 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
           // used to call setIdle() and kill screenshot capture. Confirm twice.
           missingTimerStreakRef.current += 1;
           if (missingTimerStreakRef.current >= 2) {
-            setIdle();
-            // Stopped on the server (auto-stop while asleep/offline): the
-            // session is now a saved entry, so reload today's total.
-            dispatchTimerStopped();
+            if (isElectron()) {
+              // The watchdog may have closed the timer while this laptop kept
+              // tracking. Reopen it from the local session instead of zeroing the clock.
+              await reopenServerSession();
+            } else {
+              setIdle();
+              dispatchTimerStopped();
+            }
           }
           return;
         }
@@ -176,7 +197,11 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
       void refreshTodayTotal();
     };
     window.addEventListener(TIMER_STOPPED_EVENT, onStopped);
-    return () => window.removeEventListener(TIMER_STOPPED_EVENT, onStopped);
+    window.addEventListener(CONNECTION_RESTORED_EVENT, onStopped);
+    return () => {
+      window.removeEventListener(TIMER_STOPPED_EVENT, onStopped);
+      window.removeEventListener(CONNECTION_RESTORED_EVENT, onStopped);
+    };
   }, [refreshTodayTotal]);
 
   // Tick the clock while running; also re-check day boundary every minute
@@ -192,7 +217,13 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
       tick();
       forceRender((n) => n + 1);
     }, 1000);
-    return () => window.clearInterval(id);
+    const touch = window.setInterval(() => {
+      void rememberTimerSession("running");
+    }, 60_000);
+    return () => {
+      window.clearInterval(id);
+      window.clearInterval(touch);
+    };
   }, [timer.status, tick, ensureToday]);
 
   // Re-render when todayLoggedMs changes while idle
@@ -200,28 +231,9 @@ export function useTimer(options?: { hydrateOnMount?: boolean }) {
     forceRender((n) => n + 1);
   }, [todayLoggedMs, timer.elapsedMs, timer.status]);
 
-  const start = useCallback(
-    async (projectId?: string | null) => {
-      await runTimerMutation(async () => {
-        try {
-          ensureToday();
-          // Default to whatever the picker shows, not the last session's project.
-          const resolved = projectId !== undefined ? projectId : selectedProjectId;
-          // Keep picker in sync (e.g. timesheet Play / General)
-          setProject(resolved ?? null);
-          const apiTimer = await timerApi.start({
-            projectId: sanitizeProjectId(resolved),
-            description: timer.description || undefined,
-          });
-          hydrateFromApi(apiTimer);
-          cancelWindowReveal();
-        } catch (err) {
-          toast.error(getErrorMessage(err, "Failed to start timer"));
-        }
-      });
-    },
-    [ensureToday, hydrateFromApi, selectedProjectId, setProject, timer.description],
-  );
+  const start = useCallback((projectId?: string | null) => {
+    startTimer(projectId);
+  }, []);
 
   const pause = useCallback(async () => {
     await pauseTimer();

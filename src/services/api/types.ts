@@ -67,6 +67,10 @@ export type ActivityPayload = {
   timestamp: string;
   appName: string;
   windowTitle?: string;
+  /** Browser hostname, when the focused app is a browser. */
+  website?: string;
+  /** Keyboard/mouse score for this slice, 0–100. */
+  activityPercent?: number;
   duration: number;
   isIdle: boolean;
   deviceId: string;

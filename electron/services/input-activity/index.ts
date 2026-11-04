@@ -14,6 +14,9 @@ export class InputActivityMonitor {
   private tickTimer: NodeJS.Timeout | null = null;
   private activeSamples = 0;
   private idleSamples = 0;
+  /** Separate from the screenshot window so a capture does not wipe the activity-log score. */
+  private logActive = 0;
+  private logIdle = 0;
   private intervalSeconds = 300;
   private idleEmitted = false;
   private onIdleForInterval: (() => void) | null = null;
@@ -28,6 +31,8 @@ export class InputActivityMonitor {
   start(intervalMs: number, onIdleForInterval: (() => void) | null) {
     this.stop();
     this.resetWindow();
+    this.logActive = 0;
+    this.logIdle = 0;
     this.idleEmitted = false;
     this.onIdleForInterval = onIdleForInterval;
     this.intervalSeconds =
@@ -65,6 +70,19 @@ export class InputActivityMonitor {
     return this.computePercent();
   }
 
+  /**
+   * Keyboard/mouse score since the previous activity sample, then start a new slice.
+   * Does not reset the screenshot window.
+   */
+  takeSamplePercent(): number {
+    const total = this.logActive + this.logIdle;
+    const percent =
+      total <= 0 ? 0 : Math.max(0, Math.min(100, Math.round((this.logActive / total) * 1000) / 10));
+    this.logActive = 0;
+    this.logIdle = 0;
+    return percent;
+  }
+
   private computePercent(): number {
     const total = this.activeSamples + this.idleSamples;
     if (total <= 0) return 0;
@@ -82,8 +100,10 @@ export class InputActivityMonitor {
     const active = idleMs < ACTIVE_WINDOW_MS;
     if (active) {
       this.activeSamples += 1;
+      this.logActive += 1;
     } else {
       this.idleSamples += 1;
+      this.logIdle += 1;
     }
 
     const intervalMs =

@@ -6,7 +6,7 @@ import type { MenuItemConstructorOptions } from "electron";
 import path from "path";
 import log from "electron-log/main";
 import { findExistingPath, getResourcesRoot, resolveAppIconPaths } from "../utils";
-import { createBrandIcon, type BrandTimerStatus } from "../utils/brand-icon";
+import { createBrandIcon, ensureBrandIco, type BrandTimerStatus } from "../utils/brand-icon";
 import { WindowRevealService } from "../services/window-reveal";
 
 export type TrayTimerStatus = BrandTimerStatus;
@@ -161,6 +161,31 @@ export function setTrayTimerStatus(status: TrayTimerStatus): void {
   updateTrayState({ timerStatus: status });
 }
 
+/**
+ * Running keeps the installer's taskbar id, so Windows shows the blue icon.
+ * Paused and stopped use a different id, which forces Windows to load the red icon.
+ * Recreating the taskbar button puts the installer's blue icon back, so don't.
+ */
+function windowsTaskbarAppId(status: TrayTimerStatus): string {
+  return status === "running" ? "com.gr8r.timetracker" : "com.gr8r.timetracker.off";
+}
+
+function applyWindowsTaskbarIcon(win: BrowserWindow, status: TrayTimerStatus): void {
+  const icoPath = ensureBrandIco(status);
+  if (!icoPath) return;
+  // Switch the taskbar identity first, then paint the icon onto that button.
+  win.setAppDetails({
+    appId: windowsTaskbarAppId(status),
+    appIconPath: icoPath,
+    appIconIndex: 0,
+    relaunchCommand: process.execPath,
+    relaunchDisplayName: "Gr8r Time Tracker",
+  });
+  const fromIco = nativeImage.createFromPath(icoPath);
+  if (!fromIco.isEmpty()) win.setIcon(fromIco);
+  log.info("[tray] taskbar icon", status, icoPath);
+}
+
 function applyStatusIcons(): void {
   const status = trayState.timerStatus;
   try {
@@ -168,19 +193,19 @@ function applyStatusIcons(): void {
       const icon = loadTrayIcon(status);
       if (!icon.isEmpty()) tray.setImage(icon);
       tray.setToolTip(
-        status === "paused"
-          ? "Gr8r Time Tracker — Paused"
-          : status === "running"
-            ? "Gr8r Time Tracker — Tracking"
-            : "Gr8r Time Tracker",
+        status === "running"
+          ? "Gr8r Time Tracker — Tracking"
+          : status === "paused"
+            ? "Gr8r Time Tracker — Paused"
+            : "Gr8r Time Tracker — Stopped",
       );
     }
     const win = targetWindow();
-    if (win) {
-      const icon = createBrandIcon(status, 32);
-      if (!icon.isEmpty() && (process.platform === "win32" || process.platform === "linux")) {
-        win.setIcon(icon);
-      }
+    if (win && process.platform === "win32") {
+      applyWindowsTaskbarIcon(win, status);
+    } else if (win && process.platform === "linux") {
+      const icon = createBrandIcon(status, 256);
+      if (!icon.isEmpty()) win.setIcon(icon);
     }
   } catch (error) {
     log.warn("[tray] failed to update status icon", error);

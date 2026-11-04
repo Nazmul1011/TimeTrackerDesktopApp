@@ -14,6 +14,13 @@ import { ROUTES } from "@/constants/routes";
 import { usersApi, type UserProfile } from "@/services/api/users.api";
 import { useAuthStore } from "@/store/auth.store";
 import { mapApiUserToUser } from "@/types";
+import { SavedCopyNote } from "@/components/layout/saved-copy-note";
+import { ProfileSkeleton } from "@/components/layout/section-skeletons";
+import { isOfflineError } from "@/lib/offline-error";
+import { readCachedView, writeCachedView } from "@/lib/view-cache";
+import { CONNECTION_RESTORED_EVENT, useConnectionStore } from "@/store/connection.store";
+
+const PROFILE_CACHE = "profile";
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -26,26 +33,47 @@ export default function ProfilePage() {
   const [timezone, setTimezone] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const online = useConnectionStore((s) => s.online);
 
   const organization = organizations.find((o) => o.id === organizationId) ?? organizations[0];
+
+  const fill = useCallback((me: UserProfile) => {
+    setProfile(me);
+    setName(me.name ?? "");
+    setPhone(me.phone ?? "");
+    setTimezone(me.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const me = await usersApi.getMe();
-      setProfile(me);
-      setName(me.name ?? "");
-      setPhone(me.phone ?? "");
-      setTimezone(me.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
-    } catch {
-      toast.error("Could not load profile");
+      writeCachedView(PROFILE_CACHE, "-", me);
+      setSavedAt(null);
+      fill(me);
+    } catch (err) {
+      // Offline: the profile as last loaded.
+      const saved = isOfflineError(err) ? readCachedView<UserProfile>(PROFILE_CACHE, "-") : null;
+      if (saved) {
+        fill(saved.data);
+        setSavedAt(saved.savedAt);
+      } else if (!isOfflineError(err)) {
+        toast.error("Could not load profile");
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fill]);
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  useEffect(() => {
+    const onRestored = () => void load();
+    window.addEventListener(CONNECTION_RESTORED_EVENT, onRestored);
+    return () => window.removeEventListener(CONNECTION_RESTORED_EVENT, onRestored);
   }, [load]);
 
   const handleSave = async () => {
@@ -57,6 +85,7 @@ export default function ProfilePage() {
         timezone: timezone.trim() || undefined,
       });
       setProfile(updated);
+      writeCachedView(PROFILE_CACHE, "-", updated);
       setSession({ user: mapApiUserToUser(updated) });
       toast.success("Profile updated");
     } catch {
@@ -83,11 +112,10 @@ export default function ProfilePage() {
       </div>
 
       {loading ? (
-        <div className="surface-card p-4 text-center text-xs text-[var(--text-muted)]">
-          Loading profile…
-        </div>
+        <ProfileSkeleton />
       ) : (
         <>
+          <SavedCopyNote savedAt={savedAt} />
           <ProfileCard
             name={profile?.name ?? name}
             email={profile?.email ?? ""}
@@ -129,10 +157,14 @@ export default function ProfilePage() {
             <Button
               size="sm"
               className="w-full"
-              disabled={saving || !name.trim()}
+              disabled={saving || !name.trim() || !online}
               onClick={() => void handleSave()}
             >
-              {saving ? "Saving…" : "Save changes"}
+              {saving
+                ? "Saving…"
+                : online
+                  ? "Save changes"
+                  : "Save is available when you're online"}
             </Button>
           </div>
         </>

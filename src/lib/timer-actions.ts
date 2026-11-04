@@ -3,15 +3,30 @@
  */
 import { toast } from "sonner";
 import { formatElapsed } from "@/lib/dayjs";
+import {
+  clearTimerQueue,
+  enqueueTimerEvent,
+  flushOfflineQueue,
+  hasPendingTimerEvents,
+  listTimerEvents,
+  offlineSavedMessage,
+  rememberTimerSession,
+  shouldQueueTimerError,
+} from "@/lib/offline-sync";
 import { sanitizeProjectId } from "@/lib/project";
+import { clearIdlePaused } from "@/lib/idle-pause-state";
+import { recordOfflineSession } from "@/lib/offline-time";
 import { dispatchTimerStopped } from "@/lib/timer-events";
 import { cancelWindowReveal } from "@/lib/window-reveal";
 import { getElectronAPI, isElectron } from "@/services/electron";
 import { timerApi } from "@/services/api/timer.api";
+import { isAppOnline } from "@/store/connection.store";
 import { useTimerStore } from "@/store/timer.store";
 import { getUserTimezone } from "@/lib/org-date";
 
 let busy = false;
+let actionSeq = 0;
+let uploadChain: Promise<void> = Promise.resolve();
 
 function getErrorMessage(err: unknown, fallback: string): string {
   if (typeof err === "object" && err !== null && "response" in err) {
@@ -34,101 +49,377 @@ export async function runTimerMutation(fn: () => Promise<void>): Promise<void> {
   }
 }
 
-export async function pauseTimer(): Promise<void> {
-  if (useTimerStore.getState().timer.status !== "running") return;
-  await runTimerMutation(async () => {
-    try {
-      const apiTimer = await timerApi.pause();
-      useTimerStore.getState().hydrateFromApi(apiTimer);
-      cancelWindowReveal();
-      if (isElectron()) {
-        void getElectronAPI()?.tracking.disarmIdleResume?.();
-        void getElectronAPI()?.notification?.show?.({
-          title: "Timer paused",
-          body: "Click Resume when you are ready.",
-        });
-      }
-    } catch (err) {
-      toast.error(getErrorMessage(err, "Failed to pause timer"));
-    }
+type TimerClick = {
+  seq: number;
+  occurredAt: string;
+  sessionStartedAt: string;
+  projectId?: string;
+  description?: string;
+};
+
+function httpStatus(err: unknown): number | undefined {
+  if (typeof err === "object" && err !== null && "response" in err) {
+    return (err as { response?: { status?: number } }).response?.status;
+  }
+  return undefined;
+}
+
+function liveElapsedMs(): number {
+  const store = useTimerStore.getState();
+  if (store.timer.status === "running" && store.segmentStartedAt) {
+    return store.baseElapsedMs + (Date.now() - store.segmentStartedAt);
+  }
+  return store.timer.elapsedMs;
+}
+
+function isCurrent(seq: number): boolean {
+  return seq === actionSeq;
+}
+
+/** Runs after the clock has already changed. Later clicks wait their turn here. */
+function enqueueUpload(task: () => Promise<void>): void {
+  uploadChain = uploadChain.then(task, task).then(
+    () => undefined,
+    () => undefined,
+  );
+}
+
+/** Quit waits for this so a stop is saved before the app closes. */
+export function whenTimerUploadsFinish(): Promise<void> {
+  return uploadChain;
+}
+
+async function sendOlderEventsFirst(): Promise<void> {
+  if (await hasPendingTimerEvents()) {
+    await flushOfflineQueue();
+  }
+}
+
+async function queueClick(
+  kind: "start" | "pause" | "resume" | "stop",
+  click: TimerClick,
+  synthetic = false,
+): Promise<boolean> {
+  return enqueueTimerEvent({
+    kind,
+    occurredAt: click.occurredAt,
+    sessionStartedAt: click.sessionStartedAt,
+    projectId: click.projectId,
+    description: click.description,
+    synthetic,
   });
 }
 
-export async function resumeTimer(): Promise<void> {
-  if (useTimerStore.getState().timer.status !== "paused") return;
-  await runTimerMutation(async () => {
-    try {
-      const apiTimer = await timerApi.resume();
-      useTimerStore.getState().hydrateFromApi(apiTimer);
-      if (isElectron()) {
-        void getElectronAPI()?.notification?.show?.({
-          title: "Timer resumed",
-          body: "Tracking is running.",
+/**
+ * "Saved on this laptop" message after a queued click. Skipped while the
+ * offline banner is up: it already says the same thing on every screen.
+ */
+function notifyOfflineSaved(): void {
+  if (!isAppOnline()) return;
+  toast.message(offlineSavedMessage());
+}
+
+function notify(title: string, body: string): void {
+  if (!isElectron()) return;
+  void getElectronAPI()?.notification?.show?.({ title, body });
+}
+
+/**
+ * The clock changes before this returns. The server is told afterwards and
+ * given up on after a few seconds. The click is queued only when that call
+ * fails, so a success is not uploaded a second time.
+ */
+export function startTimer(projectId?: string | null): void {
+  const store = useTimerStore.getState();
+  if (store.timer.status !== "idle" || busy) return;
+  busy = true;
+  clearIdlePaused();
+  try {
+    store.ensureToday();
+    const resolved = projectId !== undefined ? projectId : store.selectedProjectId;
+    store.setProject(resolved ?? null);
+    const occurredAt = new Date().toISOString();
+    const resolvedProjectId = sanitizeProjectId(resolved);
+    const description = store.timer.description || undefined;
+    const seq = ++actionSeq;
+    store.applyElapsedSeconds(0, "running", {
+      id: "local",
+      startedAt: occurredAt,
+      projectId: resolvedProjectId ?? null,
+      description: description ?? "",
+    });
+    void rememberTimerSession("running");
+    cancelWindowReveal();
+    const click: TimerClick = {
+      seq,
+      occurredAt,
+      sessionStartedAt: occurredAt,
+      projectId: resolvedProjectId,
+      description,
+    };
+    enqueueUpload(async () => {
+      try {
+        await sendOlderEventsFirst();
+        const apiTimer = await timerApi.start({
+          projectId: click.projectId,
+          description: click.description,
+          occurredAt: click.occurredAt,
         });
+        if (!isCurrent(seq)) return;
+        useTimerStore.getState().hydrateFromApi(apiTimer);
+        void rememberTimerSession("running");
+      } catch (err) {
+        if (httpStatus(err) === 409) {
+          if (!isCurrent(seq)) return;
+          try {
+            const current = await timerApi.current();
+            if (!isCurrent(seq)) return;
+            useTimerStore.getState().hydrateFromApi(current);
+            const next = useTimerStore.getState().timer.status;
+            void rememberTimerSession(
+              next === "paused" ? "paused" : next === "running" ? "running" : "idle",
+            );
+          } catch {
+            // keep the clock that was shown on click
+          }
+          return;
+        }
+        if (!shouldQueueTimerError(err)) {
+          if (isCurrent(seq)) {
+            useTimerStore.getState().setIdle();
+            toast.error(getErrorMessage(err, "Failed to start timer"));
+          }
+          return;
+        }
+        const queued = await queueClick("start", click);
+        if (!queued) {
+          if (isCurrent(seq)) {
+            useTimerStore.getState().setIdle();
+            toast.error(getErrorMessage(err, "Failed to start timer"));
+          }
+          return;
+        }
+        if (isCurrent(seq)) notifyOfflineSaved();
+        void flushOfflineQueue();
       }
-    } catch (err) {
-      toast.error(getErrorMessage(err, "Failed to resume timer"));
-    }
-  });
+    });
+  } finally {
+    busy = false;
+  }
+}
+
+export async function pauseTimer(): Promise<void> {
+  const store = useTimerStore.getState();
+  if (store.timer.status !== "running" || busy || !store.timer.startedAt) return;
+  busy = true;
+  clearIdlePaused();
+  try {
+    const occurredAt = new Date().toISOString();
+    const liveMs = liveElapsedMs();
+    const seq = ++actionSeq;
+    const click: TimerClick = {
+      seq,
+      occurredAt,
+      sessionStartedAt: store.timer.startedAt,
+      projectId: store.timer.projectId ?? undefined,
+      description: store.timer.description || undefined,
+    };
+    store.applyElapsedSeconds(liveMs / 1000, "paused", { pausedAt: occurredAt });
+    cancelWindowReveal();
+    void rememberTimerSession("paused");
+    if (isElectron()) void getElectronAPI()?.tracking.disarmIdleResume?.("manual pause");
+    notify("Timer paused", "Click Resume when you are ready.");
+    enqueueUpload(async () => {
+      try {
+        await sendOlderEventsFirst();
+        const apiTimer = await timerApi.pause({ occurredAt: click.occurredAt });
+        if (!isCurrent(seq)) return;
+        useTimerStore.getState().hydrateFromApi(apiTimer);
+        void rememberTimerSession("paused");
+      } catch (err) {
+        if (!shouldQueueTimerError(err)) {
+          if (isCurrent(seq)) {
+            useTimerStore.getState().applyElapsedSeconds(liveMs / 1000, "running");
+            toast.error(getErrorMessage(err, "Failed to pause timer"));
+          }
+          return;
+        }
+        const queued = await queueClick("pause", click);
+        if (!queued) {
+          if (isCurrent(seq)) {
+            useTimerStore.getState().applyElapsedSeconds(liveMs / 1000, "running");
+            toast.error(getErrorMessage(err, "Failed to pause timer"));
+          }
+          return;
+        }
+        if (isCurrent(seq)) notifyOfflineSaved();
+        void flushOfflineQueue();
+      }
+    });
+  } finally {
+    busy = false;
+  }
+}
+
+export async function resumeTimer(): Promise<void> {
+  const store = useTimerStore.getState();
+  if (store.timer.status !== "paused" || busy || !store.timer.startedAt) return;
+  busy = true;
+  clearIdlePaused();
+  try {
+    const occurredAt = new Date().toISOString();
+    const pausedMs = store.timer.elapsedMs;
+    const seq = ++actionSeq;
+    const click: TimerClick = {
+      seq,
+      occurredAt,
+      sessionStartedAt: store.timer.startedAt,
+      projectId: store.timer.projectId ?? undefined,
+      description: store.timer.description || undefined,
+    };
+    store.applyElapsedSeconds(pausedMs / 1000, "running");
+    void rememberTimerSession("running");
+    notify("Timer resumed", "Tracking is running.");
+    enqueueUpload(async () => {
+      try {
+        await sendOlderEventsFirst();
+        const apiTimer = await timerApi.resume({ occurredAt: click.occurredAt });
+        if (!isCurrent(seq)) return;
+        useTimerStore.getState().hydrateFromApi(apiTimer);
+        void rememberTimerSession("running");
+      } catch (err) {
+        if (!shouldQueueTimerError(err)) {
+          if (isCurrent(seq)) {
+            useTimerStore.getState().applyElapsedSeconds(pausedMs / 1000, "paused", {
+              pausedAt: click.occurredAt,
+            });
+            toast.error(getErrorMessage(err, "Failed to resume timer"));
+          }
+          return;
+        }
+        const queued = await queueClick("resume", click);
+        if (!queued) {
+          if (isCurrent(seq)) {
+            useTimerStore.getState().applyElapsedSeconds(pausedMs / 1000, "paused", {
+              pausedAt: click.occurredAt,
+            });
+            toast.error(getErrorMessage(err, "Failed to resume timer"));
+          }
+          return;
+        }
+        if (isCurrent(seq)) notifyOfflineSaved();
+        void flushOfflineQueue();
+      }
+    });
+  } finally {
+    busy = false;
+  }
 }
 
 export async function stopTimer(options?: {
   silent?: boolean;
   skipTodaySync?: boolean;
 }): Promise<boolean> {
-  const status = useTimerStore.getState().timer.status;
-  if (status !== "running" && status !== "paused") return false;
-  let ok = false;
-  await runTimerMutation(async () => {
-    const store = useTimerStore.getState();
-    try {
-      const sessionSeconds = Math.max(0, Math.round(store.timer.elapsedMs / 1000));
-      // Read before the request: the realtime `timer:stopped` event can land
-      // first and already add this session to the total.
-      const previousLogged = store.todayLoggedMs;
-      const result = await timerApi.stop({
-        description: store.timer.description || undefined,
-      });
-      const rows = result?.entries ?? [];
-      const fromEntries = rows.reduce((sum, entry) => sum + (entry.duration ?? 0), 0);
-      const savedSeconds = result?.totalDurationSeconds || fromEntries || sessionSeconds;
-      useTimerStore.getState().setIdle();
-      cancelWindowReveal();
-      if (!options?.skipTodaySync) {
-        if (savedSeconds > 0) {
+  const store = useTimerStore.getState();
+  const status = store.timer.status;
+  if ((status !== "running" && status !== "paused") || busy || !store.timer.startedAt) {
+    return false;
+  }
+  busy = true;
+  clearIdlePaused();
+  try {
+    const sessionSeconds = Math.max(0, Math.round(liveElapsedMs() / 1000));
+    const previousLogged = store.todayLoggedMs;
+    const occurredAt = new Date().toISOString();
+    const seq = ++actionSeq;
+    const click: TimerClick = {
+      seq,
+      occurredAt,
+      sessionStartedAt: store.timer.startedAt,
+      projectId: store.timer.projectId ?? undefined,
+      description: store.timer.description || undefined,
+    };
+    store.setIdle();
+    cancelWindowReveal();
+    if (!options?.skipTodaySync && sessionSeconds > 0) {
+      store.setTodayLoggedSeconds(previousLogged / 1000 + sessionSeconds);
+    }
+    void rememberTimerSession("idle");
+    enqueueUpload(async () => {
+      try {
+        await sendOlderEventsFirst();
+        const result = await timerApi.stop({
+          description: click.description,
+          occurredAt: click.occurredAt,
+        });
+        const rows = result?.entries ?? [];
+        const fromEntries = rows.reduce((sum, entry) => sum + (entry.duration ?? 0), 0);
+        const explicit = result?.totalDurationSeconds;
+        const savedSeconds =
+          typeof explicit === "number" ? explicit : fromEntries > 0 ? fromEntries : sessionSeconds;
+        if (isCurrent(seq) && !options?.skipTodaySync) {
           useTimerStore.getState().setTodayLoggedSeconds(previousLogged / 1000 + savedSeconds);
         }
-        // Listeners reload today's total from the server in the background;
-        // the buttons must not wait for it.
         dispatchTimerStopped({
           totalDurationSeconds: savedSeconds,
           entryCount: result?.count ?? rows.length,
         });
-      } else {
-        dispatchTimerStopped({
-          totalDurationSeconds: savedSeconds,
-          entryCount: result?.count ?? rows.length,
-        });
-      }
-      if (!options?.silent) {
-        if (savedSeconds > 0) {
-          toast.success(`Saved ${formatElapsed(savedSeconds * 1000)} to timesheet`);
-        } else {
-          toast.success("Timer stopped");
+        if (isCurrent(seq) && !options?.silent) {
+          if (savedSeconds > 0) {
+            toast.success(`Saved ${formatElapsed(savedSeconds * 1000)} to timesheet`);
+          } else {
+            toast.success("Timer stopped");
+          }
         }
+      } catch (err) {
+        if (!shouldQueueTimerError(err)) {
+          if (isCurrent(seq)) {
+            toast.error(getErrorMessage(err, "Failed to stop timer"));
+            useTimerStore.getState().setTodayLoggedSeconds(previousLogged / 1000);
+            try {
+              const current = await timerApi.current();
+              if (isCurrent(seq)) useTimerStore.getState().hydrateFromApi(current);
+            } catch {
+              // keep the stopped clock
+            }
+          }
+          return;
+        }
+        const pending = await listTimerEvents();
+        if (!pending.some((row) => row.payload.kind === "start")) {
+          await enqueueTimerEvent({
+            kind: "start",
+            occurredAt: click.sessionStartedAt,
+            sessionStartedAt: click.sessionStartedAt,
+            projectId: click.projectId,
+            description: click.description,
+            synthetic: true,
+          });
+        }
+        const queued = await queueClick("stop", click);
+        if (!queued) {
+          if (isCurrent(seq)) {
+            toast.error(getErrorMessage(err, "Failed to stop timer"));
+            useTimerStore.getState().setTodayLoggedSeconds(previousLogged / 1000);
+          }
+          return;
+        }
+        recordOfflineSession({
+          sessionStartedAt: click.sessionStartedAt,
+          endedAt: click.occurredAt,
+          seconds: sessionSeconds,
+          description: click.description,
+          projectId: click.projectId,
+        });
+        dispatchTimerStopped({ totalDurationSeconds: sessionSeconds, entryCount: 0 });
+        if (isCurrent(seq) && !options?.silent) notifyOfflineSaved();
+        void flushOfflineQueue();
       }
-      ok = true;
-    } catch (err) {
-      toast.error(getErrorMessage(err, "Failed to stop timer"));
-      try {
-        const current = await timerApi.current();
-        useTimerStore.getState().hydrateFromApi(current);
-      } catch {
-        // keep local state
-      }
-    }
-  });
-  return ok;
+    });
+    return true;
+  } finally {
+    busy = false;
+  }
 }
 
 /**
@@ -140,6 +431,9 @@ export async function resetDayTimer(): Promise<boolean> {
   await runTimerMutation(async () => {
     try {
       await timerApi.resetDay(getUserTimezone());
+      clearIdlePaused();
+      await clearTimerQueue();
+      await rememberTimerSession("idle");
       const store = useTimerStore.getState();
       const currentProject = store.selectedProjectId;
       store.reset();

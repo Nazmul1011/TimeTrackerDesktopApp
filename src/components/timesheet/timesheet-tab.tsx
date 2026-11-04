@@ -13,6 +13,14 @@ import { TIMER_STOPPED_EVENT } from "@/lib/timer-events";
 import { timesheetApi, type ApiTimeEntry } from "@/services/api/timesheet.api";
 import { useAuthStore } from "@/store/auth.store";
 import { useTimerStore } from "@/store/timer.store";
+import { CONNECTION_RESTORED_EVENT, useConnectionStore } from "@/store/connection.store";
+import { SavedCopyNote } from "@/components/layout/saved-copy-note";
+import { TimesheetSkeleton } from "@/components/layout/section-skeletons";
+import { isOfflineRowId, loadOfflineOverlay } from "@/lib/offline-overlay";
+import { todayInUserZone, todayInZone } from "@/lib/org-date";
+import { readCachedView, writeCachedView } from "@/lib/view-cache";
+
+const TIMESHEET_CACHE = "timesheetToday";
 
 function entryTitle(entry: ApiTimeEntry): string {
   return entry.description?.trim() || entry.project?.name || "General";
@@ -25,6 +33,8 @@ export function TimesheetTab() {
   const { timer, start, pause, resume, isRunning, isPaused, stop } = useTimer();
   const [entries, setEntries] = useState<ApiTimeEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const online = useConnectionStore((s) => s.online);
 
   const reload = useCallback(async () => {
     if (!organizationId) {
@@ -37,15 +47,29 @@ export function TimesheetTab() {
     const isStale = () => useAuthStore.getState().organizationId !== requestedOrg;
 
     setLoading(true);
+    const day = todayInZone(orgTimezone);
+    let rows: ApiTimeEntry[] = [];
+    let copySavedAt: number | null = null;
     try {
-      const rows = await timesheetApi.listToday(orgTimezone);
-      if (isStale()) return;
-      setEntries(
-        rows.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()),
-      );
+      rows = await timesheetApi.listToday(orgTimezone);
+      if (!isStale()) writeCachedView(TIMESHEET_CACHE, day, rows);
     } catch {
+      // Server unreachable: today's saved copy, if there is one.
+      const saved = readCachedView<ApiTimeEntry[]>(TIMESHEET_CACHE, day);
+      rows = saved?.data ?? [];
+      copySavedAt = saved?.savedAt ?? null;
+    }
+    try {
+      // Sessions stopped offline are not on the server yet.
+      const offline = await loadOfflineOverlay(undefined, { sessions: true });
       if (isStale()) return;
-      setEntries([]);
+      const today = offline.entries.filter((entry) => entry.date === todayInUserZone());
+      setSavedAt(copySavedAt);
+      setEntries(
+        [...rows, ...today].sort(
+          (a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime(),
+        ),
+      );
     } finally {
       if (!isStale()) setLoading(false);
     }
@@ -68,7 +92,11 @@ export function TimesheetTab() {
       void reload();
     };
     window.addEventListener(TIMER_STOPPED_EVENT, handler);
-    return () => window.removeEventListener(TIMER_STOPPED_EVENT, handler);
+    window.addEventListener(CONNECTION_RESTORED_EVENT, handler);
+    return () => {
+      window.removeEventListener(TIMER_STOPPED_EVENT, handler);
+      window.removeEventListener(CONNECTION_RESTORED_EVENT, handler);
+    };
   }, [reload]);
 
   const handleRowControl = (projectId: string | null) => {
@@ -139,50 +167,59 @@ export function TimesheetTab() {
           playEnabled: isLatest,
           playState:
             isLatest && sameLiveProject && isRunning ? ("running" as const) : ("paused" as const),
+          pending: isOfflineRowId(entry.id),
         };
       }),
     [entries, isRunning, latestIdByProject, liveProjectKey],
   );
 
-  if (loading) {
-    return (
-      <div className="overflow-hidden rounded-xl border border-[#ededed] bg-white p-4 text-center text-xs text-[#99a1af] dark:border-[#334155] dark:bg-card dark:text-[#64748b]">
-        Loading today&apos;s entries…
-      </div>
-    );
+  // Placeholder only until something can be shown; reloads keep the list.
+  if (loading && !rows.length) {
+    return <TimesheetSkeleton />;
   }
 
   if (!rows.length) {
     return (
-      <div className="overflow-hidden rounded-xl border border-[#ededed] bg-white p-4 text-center text-xs text-[#99a1af] dark:border-[#334155] dark:bg-card dark:text-[#64748b]">
-        {isRunning || isPaused
-          ? "Timer is currently active. Completed time will appear here when paused or stopped."
-          : "No time logged today. Start the timer to track time."}
-      </div>
+      <>
+        <SavedCopyNote savedAt={savedAt} className="mb-1.5" />
+        <div className="overflow-hidden rounded-xl border border-[#ededed] bg-white p-4 text-center text-xs text-[#99a1af] dark:border-[#334155] dark:bg-card dark:text-[#64748b]">
+          {isRunning || isPaused
+            ? "Timer is currently active. Completed time will appear here when paused or stopped."
+            : "No time logged today. Start the timer to track time."}
+        </div>
+      </>
     );
   }
 
   return (
-    <div className="max-h-[min(280px,calc(100vh-340px))] overflow-y-auto overflow-x-hidden rounded-xl border border-[#ededed] bg-white dark:border-[#334155] dark:bg-card">
-      {rows.map(
-        ({ entry, title, projectLabel, duration, isActive, playState, playEnabled }, index) => (
-          <TimesheetRow
-            key={entry.id}
-            entry={entry}
-            title={title}
-            projectLabel={projectLabel}
-            duration={duration}
-            isActive={isActive}
-            playState={playState}
-            playEnabled={playEnabled}
-            showMenu={!isActive}
-            compact={index === 0}
-            onPlay={() => handleRowControl(entry.projectId ?? null)}
-            onSave={(payload) => handleSaveEdit(entry, payload)}
-            onDelete={() => handleDelete(entry)}
-          />
-        ),
-      )}
-    </div>
+    <>
+      <SavedCopyNote savedAt={savedAt} className="mb-1.5" />
+      <div className="max-h-[min(280px,calc(100vh-340px))] overflow-y-auto overflow-x-hidden rounded-xl border border-[#ededed] bg-white dark:border-[#334155] dark:bg-card">
+        {rows.map(
+          (
+            { entry, title, projectLabel, duration, isActive, playState, playEnabled, pending },
+            index,
+          ) => (
+            <TimesheetRow
+              key={entry.id}
+              entry={entry}
+              title={title}
+              projectLabel={projectLabel}
+              duration={duration}
+              isActive={isActive}
+              playState={playState}
+              playEnabled={playEnabled}
+              // Edit and delete go to the server; offline rows are not there yet.
+              showMenu={!isActive && online && !pending}
+              pendingUpload={pending}
+              compact={index === 0}
+              onPlay={() => handleRowControl(entry.projectId ?? null)}
+              onSave={(payload) => handleSaveEdit(entry, payload)}
+              onDelete={() => handleDelete(entry)}
+            />
+          ),
+        )}
+      </div>
+    </>
   );
 }

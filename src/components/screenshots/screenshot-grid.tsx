@@ -14,9 +14,21 @@ import { screenshotApi, resolveScreenshotUrl } from "@/services/api/screenshot.a
 import { getElectronAPI, isElectron } from "@/services/electron";
 import { useAuthStore } from "@/store/auth.store";
 import { useTimerStore } from "@/store/timer.store";
+import { CONNECTION_RESTORED_EVENT, useConnectionStore } from "@/store/connection.store";
+import { SavedCopyNote } from "@/components/layout/saved-copy-note";
+import { ScreenshotGridSkeleton } from "@/components/layout/section-skeletons";
+import { todayInZone } from "@/lib/org-date";
+import { readCachedView, writeCachedView } from "@/lib/view-cache";
 import { ScreenshotCard, type ScreenshotItem } from "@/components/screenshots/screenshot-card";
 
 const PAGE_SIZE = 10;
+const SHOTS_CACHE = "screenshotsToday";
+
+type SavedShotsPage = {
+  items: Awaited<ReturnType<typeof screenshotApi.listToday>>["items"];
+  total: number;
+  totalPages: number;
+};
 
 function mapApiToItem(item: {
   id: string;
@@ -38,6 +50,28 @@ function mapApiToItem(item: {
   };
 }
 
+async function loadPendingShots(): Promise<ScreenshotItem[]> {
+  if (!isElectron()) return [];
+  const list = await getElectronAPI()
+    ?.sync?.pendingScreenshots?.()
+    .catch(() => []);
+  if (!list?.length) return [];
+  return list.map((shot) => ({
+    id: shot.id,
+    imageUrl: shot.imageUrl,
+    capturedAt: shot.capturedAt,
+    appName: shot.appName,
+    timeLabel: dayjs(shot.capturedAt).format("hh:mm A"),
+    activityPercent: shot.activityPercent,
+    pendingUpload: true,
+  }));
+}
+
+function withPending(pending: ScreenshotItem[], server: ScreenshotItem[]): ScreenshotItem[] {
+  const seen = new Set(pending.map((shot) => shot.id));
+  return [...pending, ...server.filter((shot) => !seen.has(shot.id))];
+}
+
 export function ScreenshotGrid() {
   const organizationId = useAuthStore((s) => s.organizationId);
   const timerStatus = useTimerStore((s) => s.timer.status);
@@ -51,6 +85,8 @@ export function ScreenshotGrid() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [captureBlocked, setCaptureBlocked] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const online = useConnectionStore((s) => s.online);
   const loadedOnceRef = useRef(false);
   const requestIdRef = useRef(0);
 
@@ -73,9 +109,20 @@ export function ScreenshotGrid() {
         setLoading(true);
       }
       setError(null);
+      const pending = await loadPendingShots();
+      if (isStale()) return;
+      const day = todayInZone(orgTimezone);
       try {
         const result = await screenshotApi.listToday(page, PAGE_SIZE, orgTimezone);
         if (isStale()) return;
+        if (page === 1) {
+          writeCachedView<SavedShotsPage>(SHOTS_CACHE, day, {
+            items: result.items,
+            total: result.total,
+            totalPages: result.totalPages,
+          });
+        }
+        setSavedAt(null);
         setTotal(result.total);
         setTotalPages(result.totalPages);
         // Deletions elsewhere can leave this page empty; fall back to the last one.
@@ -83,13 +130,33 @@ export function ScreenshotGrid() {
           setPage(Math.max(1, result.totalPages));
           return;
         }
-        setItems(result.items.map(mapApiToItem));
+        setItems(
+          page === 1
+            ? withPending(pending, result.items.map(mapApiToItem))
+            : result.items.map(mapApiToItem),
+        );
         loadedOnceRef.current = true;
       } catch {
         if (isStale()) return;
+        // Server unreachable: the first page as it was last loaded today.
+        const saved = page === 1 ? readCachedView<SavedShotsPage>(SHOTS_CACHE, day) : null;
+        if (saved) {
+          setError(null);
+          setItems(withPending(pending, saved.data.items.map(mapApiToItem)));
+          setTotal(saved.data.total);
+          setTotalPages(saved.data.totalPages);
+          setSavedAt(saved.savedAt);
+          loadedOnceRef.current = true;
+          return;
+        }
+        if (pending.length) {
+          setError(null);
+          setItems(pending);
+          loadedOnceRef.current = true;
+          return;
+        }
         if (!loadedOnceRef.current) {
           setError("Could not load screenshots");
-          setItems([]);
         }
       } finally {
         if (!isStale()) {
@@ -130,26 +197,32 @@ export function ScreenshotGrid() {
           id?: string;
           url?: string;
           activityPercent?: number;
+          capturedAt?: string;
+          appName?: string;
         }>
       ).detail;
       // Newest first, so a new capture only belongs on the first page.
       if (detail?.id && detail?.url && page === 1) {
         const imageUrl = resolveScreenshotUrl(detail.url) ?? detail.url;
+        const capturedAt = detail.capturedAt || new Date().toISOString();
+        const local = detail.id.startsWith("local-");
         setItems((prev) => {
           if (prev.some((row) => row.id === detail.id)) return prev;
           return [
             {
               id: detail.id!,
               imageUrl,
-              capturedAt: new Date().toISOString(),
-              appName: null,
-              timeLabel: dayjs().format("hh:mm A"),
+              capturedAt,
+              appName: detail.appName ?? null,
+              timeLabel: dayjs(capturedAt).format("hh:mm A"),
               activityPercent:
                 typeof detail.activityPercent === "number" ? detail.activityPercent : null,
+              pendingUpload: local,
             },
             ...prev,
           ].slice(0, PAGE_SIZE);
         });
+        if (local) setError(null);
       }
       void reload({ silent: true });
     };
@@ -165,9 +238,12 @@ export function ScreenshotGrid() {
       void reload({ silent: true });
     }, 30_000);
     const unsubVisible = onPageVisible(() => void reload({ silent: true }));
+    const onRestored = () => void reload({ silent: true });
+    window.addEventListener(CONNECTION_RESTORED_EVENT, onRestored);
     return () => {
       window.clearInterval(id);
       unsubVisible();
+      window.removeEventListener(CONNECTION_RESTORED_EVENT, onRestored);
     };
   }, [reload]);
 
@@ -202,17 +278,16 @@ export function ScreenshotGrid() {
   };
 
   if (loading) {
-    return (
-      <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-4 text-center text-xs text-[var(--text-muted)] dark:bg-card">
-        Loading screenshots…
-      </div>
-    );
+    return <ScreenshotGridSkeleton />;
   }
 
   if (error) {
     return (
-      <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-4 text-center text-xs text-red-500 dark:bg-card">
-        {error}
+      // Offline with nothing saved yet: say so instead of showing an error.
+      <div
+        className={`rounded-xl border border-[var(--border-subtle)] bg-white p-4 text-center text-xs dark:bg-card ${online ? "text-red-500" : "text-[var(--text-muted)]"}`}
+      >
+        {online ? error : "You're offline. Screenshots appear here when you're back online."}
       </div>
     );
   }
@@ -272,12 +347,18 @@ export function ScreenshotGrid() {
 
   return (
     <div className="flex flex-col gap-3">
+      <SavedCopyNote savedAt={savedAt} />
       <div
         className={`grid grid-cols-2 gap-2 transition-opacity ${pageLoading ? "opacity-50" : ""}`}
         aria-busy={pageLoading}
       >
         {items.map((item) => (
-          <ScreenshotCard key={item.id} item={item} onRequestDelete={handleRequestDelete} />
+          <ScreenshotCard
+            key={item.id}
+            item={item}
+            offline={!online}
+            onRequestDelete={handleRequestDelete}
+          />
         ))}
       </div>
 

@@ -4,6 +4,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { CloudUpload } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,6 +44,8 @@ interface TimesheetRowProps {
   playEnabled?: boolean;
   unlinked?: boolean;
   showMenu?: boolean;
+  /** Recorded offline, still waiting to upload. */
+  pendingUpload?: boolean;
   compact?: boolean;
   onPlay?: () => void;
   onSave: (payload: { description: string; projectId: string | null }) => Promise<void>;
@@ -59,6 +62,7 @@ export function TimesheetRow({
   playEnabled = false,
   unlinked,
   showMenu = true,
+  pendingUpload = false,
   compact,
   onPlay,
   onSave,
@@ -144,6 +148,14 @@ export function TimesheetRow({
           <div className="flex min-w-0 flex-1 items-center gap-1">
             <p className="truncate text-sm leading-5 text-[#1e2939] dark:text-[#f1f5f9]">{title}</p>
             {isActive && <FigmaGlyph src="/figma/icon-dot.svg" size={12} />}
+            {pendingUpload ? (
+              <span
+                className="flex shrink-0 items-center text-amber-600 dark:text-amber-300"
+                title="Recorded offline. Uploads when you're back online."
+              >
+                <CloudUpload className="size-3.5" aria-label="Waiting to upload" />
+              </span>
+            ) : null}
           </div>
 
           <div

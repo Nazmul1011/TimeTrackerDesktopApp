@@ -3,7 +3,8 @@
  */
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { CloudOff, CloudUpload, ImageOff } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,17 +23,51 @@ export type ScreenshotItem = {
   imageUrl?: string | null;
   appName?: string | null;
   deleteRequested?: boolean;
+  /** Saved on this PC and not uploaded yet. */
+  pendingUpload?: boolean;
   activityPercent?: number | null;
 };
+
+/** Shown when the image cannot load: the server copy while offline, or a missing image. */
+function PreviewPlaceholder({ offline }: { offline: boolean }) {
+  const Icon = offline ? CloudOff : ImageOff;
+  return (
+    <div className="relative flex size-full flex-col items-center justify-center gap-1.5 overflow-hidden bg-[#f4f6f9] px-3 text-center dark:bg-[#131c2e]">
+      {/* Faint dot grid so the empty box still reads as an image area. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-60 [background-image:radial-gradient(circle,rgba(100,116,139,0.18)_1px,transparent_1px)] [background-size:12px_12px] dark:opacity-40"
+      />
+      <span className="relative flex size-8 items-center justify-center rounded-full bg-white text-[#64748b] shadow-sm ring-1 ring-black/5 dark:bg-white/[0.06] dark:text-[#94a3b8] dark:ring-white/10">
+        <Icon className="size-4" strokeWidth={2} aria-hidden />
+      </span>
+      <span className="relative flex flex-col gap-0.5">
+        <span className="text-[10px] font-semibold leading-3 text-[#334155] dark:text-[#cbd5e1]">
+          {offline ? "Preview offline" : "No preview"}
+        </span>
+        <span className="text-[9px] leading-3 text-[#64748b] dark:text-[#64748b]">
+          {offline ? "Shows when you're back online" : "The image is not available"}
+        </span>
+      </span>
+    </div>
+  );
+}
 
 interface ScreenshotCardProps {
   item: ScreenshotItem;
   onRequestDelete?: (id: string) => void | Promise<void>;
+  /** Server unreachable: deletion requests wait, server images may not load. */
+  offline?: boolean;
 }
 
-export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
+export function ScreenshotCard({ item, onRequestDelete, offline = false }: ScreenshotCardProps) {
   const [showDelete, setShowDelete] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
+
+  // Back online: try the server image again instead of keeping the placeholder.
+  useEffect(() => {
+    if (!offline) setImgFailed(false);
+  }, [offline]);
 
   const activityLabel =
     typeof item.activityPercent === "number" ? formatActivityPercent(item.activityPercent) : null;
@@ -66,10 +101,15 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
             onError={() => setImgFailed(true)}
           />
         ) : (
-          <div className="flex size-full items-center justify-center bg-gradient-to-br from-slate-200 to-slate-300 text-[10px] text-slate-500">
-            No preview
-          </div>
+          <PreviewPlaceholder offline={offline} />
         )}
+
+        {item.pendingUpload ? (
+          <span className="absolute right-1.5 top-1.5 flex items-center gap-1 rounded bg-white/90 px-1.5 py-0.5 text-[9px] font-medium text-amber-700 shadow-sm dark:bg-black/60 dark:text-amber-300">
+            <CloudUpload className="size-2.5" aria-hidden />
+            Waiting to upload
+          </span>
+        ) : null}
 
         {item.deleteRequested ? (
           <span className="absolute left-1.5 top-1.5 rounded bg-amber-500/90 px-1.5 py-0.5 text-[9px] font-medium text-white">
@@ -110,9 +150,9 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
               variant="outline"
               size="sm"
               className="h-8 border-red-400 bg-white text-xs text-red-500 hover:bg-red-50 hover:text-red-600 dark:border-red-500/60 dark:bg-card dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300"
-              disabled={item.deleteRequested}
+              disabled={item.deleteRequested || offline || item.pendingUpload}
               onClick={() => {
-                if (item.deleteRequested) return;
+                if (item.deleteRequested || offline || item.pendingUpload) return;
                 void (async () => {
                   try {
                     await onRequestDelete?.(item.id);
@@ -124,7 +164,11 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
                 })();
               }}
             >
-              {item.deleteRequested ? "Request pending" : "Request to delete"}
+              {item.deleteRequested
+                ? "Request pending"
+                : offline
+                  ? "Available when you're online"
+                  : "Request to delete"}
             </Button>
           </div>
         )}
@@ -137,32 +181,41 @@ export function ScreenshotCard({ item, onRequestDelete }: ScreenshotCardProps) {
             <p className="truncate text-[10px] text-[var(--text-muted)]">{item.appName}</p>
           ) : null}
         </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button type="button" className="outline-none" aria-label="Screenshot menu">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/figma/icon-more.svg"
-                alt=""
-                className={`size-4 ${DARK_INK_INVERT}`}
-                width={16}
-                height={16}
-              />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem disabled={item.deleteRequested} onClick={() => setShowDelete(true)}>
-              {item.deleteRequested ? "Deletion pending" : "Request to delete"}
-            </DropdownMenuItem>
-            {item.imageUrl ? (
+        {item.pendingUpload ? null : (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" className="outline-none" aria-label="Screenshot menu">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/figma/icon-more.svg"
+                  alt=""
+                  className={`size-4 ${DARK_INK_INVERT}`}
+                  width={16}
+                  height={16}
+                />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
               <DropdownMenuItem
-                onClick={() => window.open(item.imageUrl!, "_blank", "noopener,noreferrer")}
+                disabled={item.deleteRequested || offline}
+                onClick={() => setShowDelete(true)}
               >
-                View
+                {item.deleteRequested
+                  ? "Deletion pending"
+                  : offline
+                    ? "Request to delete (when online)"
+                    : "Request to delete"}
               </DropdownMenuItem>
-            ) : null}
-          </DropdownMenuContent>
-        </DropdownMenu>
+              {item.imageUrl ? (
+                <DropdownMenuItem
+                  onClick={() => window.open(item.imageUrl!, "_blank", "noopener,noreferrer")}
+                >
+                  View
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
     </div>
   );

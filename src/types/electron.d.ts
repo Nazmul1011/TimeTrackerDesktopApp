@@ -33,7 +33,9 @@ export interface ElectronAPI {
   };
   activity: {
     getIdleState: (thresholdSeconds?: number) => Promise<{ idle: boolean; idleMs: number }>;
-    getActiveWindow: () => Promise<{ appName: string; windowTitle: string }>;
+    getActiveWindow: () => Promise<{ appName: string; windowTitle: string; website?: string }>;
+    /** Keyboard/mouse score since the last call, 0–100. */
+    takeInputScore: () => Promise<{ activityPercent: number }>;
     /** Real OS app icon as data-URL PNG, or null */
     getAppIcon: (appName: string) => Promise<string | null>;
     getAppIcons: (appNames: string[]) => Promise<Record<string, string | null>>;
@@ -93,7 +95,8 @@ export interface ElectronAPI {
       callback: (payload?: { intervalMs?: number; activityPercent?: number }) => void,
     ) => () => void;
     onIdleResume: (callback: (payload?: { resumedAt?: string }) => void) => () => void;
-    disarmIdleResume: () => Promise<{ ok: boolean }>;
+    disarmIdleResume: (reason?: string) => Promise<{ ok: boolean }>;
+    armIdleResume?: (reason?: string) => Promise<{ ok: boolean; armed: boolean }>;
     openScreenRecording: () => Promise<{ ok: boolean }>;
     retryScreenshots: () => Promise<{ ok: boolean; message?: string }>;
   };
@@ -112,6 +115,7 @@ export interface ElectronAPI {
       idleTimeoutMinutes: number;
       autoStartOnLogin: boolean;
       notificationsEnabled: boolean;
+      timelineEditEnabled: boolean;
     }>;
     set: (
       payload: Partial<{
@@ -120,6 +124,7 @@ export interface ElectronAPI {
         idleTimeoutMinutes: number;
         autoStartOnLogin: boolean;
         notificationsEnabled: boolean;
+        timelineEditEnabled: boolean;
       }>,
     ) => Promise<{
       ok: boolean;
@@ -129,13 +134,46 @@ export interface ElectronAPI {
         idleTimeoutMinutes: number;
         autoStartOnLogin: boolean;
         notificationsEnabled: boolean;
+        timelineEditEnabled: boolean;
       };
       message?: string;
     }>;
   };
   sync: {
-    run: () => Promise<unknown>;
-    getStatus: () => Promise<unknown>;
+    enqueue: (body: { kind: string; payload: unknown }) => Promise<{ ok: boolean; id?: number }>;
+    list: (
+      kind?: string,
+    ) => Promise<Array<{ id: number; kind: string; payload: unknown; createdAt: string }>>;
+    ack: (ids: number[]) => Promise<{ ok: boolean }>;
+    clear: (kind: string) => Promise<{ ok: boolean }>;
+    getBootId: () => Promise<string>;
+    getSession: (organizationId: string) => Promise<{
+      organizationId: string;
+      status: "running" | "paused" | "idle";
+      startedAt: string | null;
+      lastEventAt: string | null;
+      projectId: string | null;
+      description: string | null;
+      bootId: string | null;
+    } | null>;
+    saveSession: (session: {
+      organizationId: string;
+      status: "running" | "paused" | "idle";
+      startedAt: string | null;
+      lastEventAt: string | null;
+      projectId: string | null;
+      description: string | null;
+    }) => Promise<{ ok: boolean }>;
+    flushScreenshots: () => Promise<{ ok: boolean; uploaded: number }>;
+    pendingScreenshots: () => Promise<
+      Array<{
+        id: string;
+        capturedAt: string;
+        appName: string;
+        activityPercent: number | null;
+        imageUrl: string;
+      }>
+    >;
   };
   tray: {
     setState: (payload: {

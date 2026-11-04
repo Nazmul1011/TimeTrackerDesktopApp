@@ -26,6 +26,7 @@ import { useTimer } from "@/hooks/useTimer";
 import { projectsApi, type ApiProject } from "@/services/api/projects.api";
 import { timesheetApi } from "@/services/api/timesheet.api";
 import { useAuthStore } from "@/store/auth.store";
+import { useSelectedDayStore } from "@/store/selected-day.store";
 import { useTimerStore } from "@/store/timer.store";
 import {
   DropdownMenu,
@@ -33,18 +34,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { FigmaGlyph } from "@/components/icons/figma-glyph";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { Pause, Play, RotateCcw, Square } from "lucide-react";
+import { Pause, Play, Square } from "lucide-react";
 import { toast } from "sonner";
 
 function apiErrorMessage(err: unknown, fallback: string): string {
@@ -79,7 +72,6 @@ export function TimerCard() {
     stop,
     pause,
     resume,
-    resetDay,
     selectProject,
     setProject,
   } = useTimer();
@@ -92,18 +84,6 @@ export function TimerCard() {
   const [clientName, setClientName] = useState("");
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
-  const [isResetting, setIsResetting] = useState(false);
-
-  const handleConfirmReset = async () => {
-    setIsResetting(true);
-    try {
-      await resetDay();
-      setResetConfirmOpen(false);
-    } finally {
-      setIsResetting(false);
-    }
-  };
 
   const loadProjects = useCallback(async () => {
     if (!organizationId) return;
@@ -134,10 +114,12 @@ export function TimerCard() {
 
   const [weekDailyTotals, setWeekDailyTotals] = useState<Record<string, number>>({});
   const stripRef = useRef<HTMLDivElement | null>(null);
-  const todayCardRef = useRef<HTMLDivElement | null>(null);
+  const todayCardRef = useRef<HTMLButtonElement | null>(null);
   const isDraggingRef = useRef(false);
+  const dragMovedRef = useRef(false);
   const startXRef = useRef(0);
   const scrollLeftRef = useRef(0);
+  const viewedYmd = useSelectedDayStore((s) => s.ymd);
 
   // Past 21 days (3 weeks) through the end of the current week (Sunday)
   const dateRange = useMemo(() => {
@@ -208,6 +190,7 @@ export function TimerCard() {
 
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     isDraggingRef.current = true;
+    dragMovedRef.current = false;
     startXRef.current = e.pageX - (stripRef.current?.offsetLeft ?? 0);
     scrollLeftRef.current = stripRef.current?.scrollLeft ?? 0;
   };
@@ -217,6 +200,7 @@ export function TimerCard() {
     e.preventDefault();
     const x = e.pageX - stripRef.current.offsetLeft;
     const walk = (x - startXRef.current) * 1.2;
+    if (Math.abs(walk) > 4) dragMovedRef.current = true;
     stripRef.current.scrollLeft = scrollLeftRef.current - walk;
   };
 
@@ -624,7 +608,10 @@ export function TimerCard() {
           type="button"
           aria-label="Show today's time"
           title="Show today's time"
-          onClick={scrollStripToToday}
+          onClick={() => {
+            useSelectedDayStore.getState().selectDay(todayDate || todayInZone(orgTimezone));
+            scrollStripToToday();
+          }}
           className="ml-auto flex shrink-0 items-center gap-1 rounded-md text-xs leading-4 outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35"
         >
           <span>
@@ -637,18 +624,6 @@ export function TimerCard() {
 
       <div className="mt-8 flex flex-col items-center gap-4 pb-2">
         <div className="relative flex items-center justify-center">
-          {/* {(displayMs > 0 || isRunning || isPaused) && (
-            <button
-              type="button"
-              aria-label="Reset today's time"
-              title="Reset today's time to 00:00:00"
-              disabled={isSyncing || isResetting}
-              className="absolute -right-12 flex size-7 shrink-0 items-center justify-center rounded-full text-[#18181b] outline-none transition-colors hover:bg-[#f5f5f5] hover:text-black dark:hover:text-[#f1f5f9] focus-visible:ring-2 focus-visible:ring-[#2b7fff]/35 disabled:opacity-40 dark:text-white dark:hover:bg-[#334155]"
-              onClick={() => setResetConfirmOpen(true)}
-            >
-              <RotateCcw className="size-4" strokeWidth={2} />
-            </button>
-          )} */}
           <p className="text-[32px] font-medium tabular-nums leading-[34px] tracking-wide text-black dark:text-white">
             {display}
           </p>
@@ -733,14 +708,21 @@ export function TimerCard() {
           const isTimerActiveToday = day.isToday && (isRunning || isPaused);
           const isPastDay = day.ymd < (todayDate || "");
           const isUnderEightHours = isPastDay && !day.isWeekend && daySeconds < 8 * 3600;
+          const isViewed = (viewedYmd ?? todayDate) === day.ymd;
 
           return (
-            <div
+            <button
               key={day.ymd}
+              type="button"
               ref={day.isToday ? todayCardRef : undefined}
+              aria-pressed={isViewed}
+              onClick={() => {
+                if (dragMovedRef.current) return;
+                useSelectedDayStore.getState().selectDay(day.ymd);
+              }}
               className={cn(
-                "flex min-w-[102px] shrink-0 flex-col items-start gap-1.5 rounded-2xl border bg-white px-3 py-2 transition-colors dark:bg-[#1e293b]",
-                isTimerActiveToday
+                "flex min-w-[102px] shrink-0 flex-col items-start gap-1.5 rounded-2xl border bg-white px-3 py-2 text-left transition-colors dark:bg-[#1e293b]",
+                isViewed
                   ? "border-[#2b7fff] shadow-[0_0_0_1px_#2b7fff] dark:border-[#2b7fff]"
                   : "border-[#ededed] dark:border-[#334155]",
               )}
@@ -768,45 +750,10 @@ export function TimerCard() {
                 )}
                 {formatElapsed(daySeconds * 1000)}
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
-
-      {/* <Dialog open={resetConfirmOpen} onOpenChange={setResetConfirmOpen}>
-        <DialogContent className="max-w-[340px] rounded-2xl p-5">
-          <DialogHeader className="gap-1.5 text-left">
-            <DialogTitle className="text-base font-semibold text-[#1e2939] dark:text-[#f1f5f9]">
-              Reset today&apos;s time?
-            </DialogTitle>
-            <DialogDescription className="text-xs leading-relaxed text-[#6a7282] dark:text-[#94a3b8]">
-              This will discard any active timer and reset all tracked time for today to 00:00:00.
-              This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="mt-3 flex flex-row justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-lg px-3 text-xs"
-              disabled={isResetting}
-              onClick={() => setResetConfirmOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              className="h-8 rounded-lg bg-[#f4323c] px-3 text-xs font-medium text-white hover:bg-[#e12d36]"
-              disabled={isResetting}
-              onClick={() => void handleConfirmReset()}
-            >
-              {isResetting ? "Resetting…" : "Reset Day"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog> */}
     </section>
   );
 }

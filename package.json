@@ -6,12 +6,15 @@
   "main": "dist-electron/main/index.js",
   "scripts": {
     "dev": "npm run electron:dev",
-    "dev:web": "next dev",
+    "dev:web": "next dev -p 3000",
     "start": "npm run electron:dev",
+    "electron:dev": "npm run electron:compile && npm run electron:icon && concurrently -k \"next dev -p 3000\" \"wait-on http://localhost:3000 && node scripts/launch-electron.cjs\"",
     "build": "next build",
     "lint": "eslint . --ext .ts,.tsx --max-warnings 0",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,md,yml,yaml}\"",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "test": "node scripts/run-tests.cjs run",
+    "test:watch": "node scripts/run-tests.cjs watch",
     "electron:compile": "tsc -p tsconfig.electron.json",
     "electron:icon": "node scripts/ensure-dev-runtime.cjs",
     "electron": "npm run electron:compile && npm run electron:icon && node scripts/launch-electron.cjs",
@@ -41,6 +44,7 @@
     "@radix-ui/react-tooltip": "^1.2.7",
     "@tanstack/react-query": "^5.83.0",
     "axios": "^1.10.0",
+    "better-sqlite3": "12.11.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -86,10 +90,10 @@
     "tailwindcss": "^3.4.17",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.8.3",
+    "vitest": "^3.2.7",
     "wait-on": "^8.0.3"
   },
   "optionalDependencies": {
-    "better-sqlite3": "^11.10.0",
     "sharp": "^0.33.5"
   },
   "lint-staged": {

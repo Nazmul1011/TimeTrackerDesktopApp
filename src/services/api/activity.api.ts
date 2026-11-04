@@ -19,33 +19,40 @@ export type ActivityAppRow = {
 
 export const activityApi = {
   async bulk(activities: ActivityPayload[]) {
-    const { data } = await apiClient.post<ApiResponse<unknown>>(
-      "/activity/bulk",
-      { activities },
-    );
+    const { data } = await apiClient.post<ApiResponse<unknown>>("/activity/bulk", { activities });
     return data.data;
   },
 
   async heartbeat(payload?: { deviceId?: string; version?: string }) {
-    const { data } = await apiClient.post<ApiResponse<unknown>>(
-      "/activity/heartbeat",
-      {
-        deviceId: payload?.deviceId ?? ensureDeviceId(),
-        version: payload?.version ?? "0.1.0",
-      },
-    );
+    const { data } = await apiClient.post<ApiResponse<unknown>>("/activity/heartbeat", {
+      deviceId: payload?.deviceId ?? ensureDeviceId(),
+      version: payload?.version ?? "0.1.0",
+    });
     return data.data;
   },
 
-  async getApps(params?: {
-    startDate?: string;
-    endDate?: string;
-    excludeIdle?: boolean;
-  }) {
-    const { data } = await apiClient.get<ApiResponse<ActivityAppRow[]>>(
-      "/activity/apps",
-      { params },
-    );
+  async getTimeline(params: { startDate: string; endDate: string }) {
+    const { data } = await apiClient.get<
+      ApiResponse<
+        Array<{
+          app: string;
+          window: string;
+          website?: string;
+          activity?: number | null;
+          productivity?: string;
+          start: string;
+          end: string;
+          duration: number;
+        }>
+      >
+    >("/activity/timeline", { params });
+    return data.data ?? [];
+  },
+
+  async getApps(params?: { startDate?: string; endDate?: string; excludeIdle?: boolean }) {
+    const { data } = await apiClient.get<ApiResponse<ActivityAppRow[]>>("/activity/apps", {
+      params,
+    });
     return data.data ?? [];
   },
 };

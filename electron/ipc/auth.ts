@@ -3,11 +3,8 @@
  */
 import { ipcMain } from "electron";
 import log from "electron-log/main";
-import { StorageService, type PersistedAuthSession } from "../services/storage";
-
-function isSessionPayload(value: unknown): value is PersistedAuthSession {
-  return Boolean(value) && typeof value === "object";
-}
+import { StorageService } from "../services/storage";
+import { authSessionSchema, parseIpcPayload } from "../security/ipc-schemas";
 
 export function registerAuthIpc(): void {
   ipcMain.handle("auth:getSession", async () => {
@@ -18,8 +15,9 @@ export function registerAuthIpc(): void {
     return session;
   });
 
-  ipcMain.handle("auth:saveSession", async (_event, payload: unknown) => {
-    if (!isSessionPayload(payload)) {
+  ipcMain.handle("auth:saveSession", async (_event, raw: unknown) => {
+    const payload = parseIpcPayload("auth:saveSession", authSessionSchema, raw);
+    if (!payload) {
       return { ok: false, message: "Invalid session payload" };
     }
     StorageService.getInstance().setAuthSession({

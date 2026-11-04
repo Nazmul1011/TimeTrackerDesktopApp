@@ -13,12 +13,21 @@ const CURSOR_POLL_MS = 250;
 const MOVE_THRESHOLD_PX = 5;
 /** If OS reports recent input at start, seed lastInputAt so we don't count cold-start as idle. */
 const SEED_ACTIVE_IF_IDLE_BELOW_SEC = 2;
+/** After waking from sleep, an OS idle reset alone does not mean the user is back. */
+const WAKE_GRACE_MS = 5_000;
 
 export class IdleService {
   private static instance: IdleService | null = null;
 
   private watching = false;
   private lastInputAt = 0;
+  /**
+   * Last input made by a person (mouse, keys, unlocking). Waking from sleep is
+   * left out: Windows can wake on its own for updates, and that must not
+   * resume an idle-paused timer.
+   */
+  private lastUserInputAt = 0;
+  private wakeGraceUntil = 0;
   private lastCursor: { x: number; y: number } | null = null;
   private lastOsIdle: number | null = null;
   private cursorTimer: NodeJS.Timeout | null = null;
@@ -35,6 +44,7 @@ export class IdleService {
     this.stopWatching();
     this.watching = true;
     this.lastInputAt = Date.now();
+    this.lastUserInputAt = 0;
     this.lastCursor = null;
     this.lastOsIdle = null;
 
@@ -50,7 +60,7 @@ export class IdleService {
     // Windows/macOS: session unlock / resume are strong activity signals.
     if (process.platform === "win32" || process.platform === "darwin") {
       powerMonitor.on("unlock-screen", this.onSessionActive);
-      powerMonitor.on("resume", this.onSessionActive);
+      powerMonitor.on("resume", this.onSystemWake);
     }
 
     log.info(
@@ -75,7 +85,7 @@ export class IdleService {
     this.xinput.stop();
     if (process.platform === "win32" || process.platform === "darwin") {
       powerMonitor.removeListener("unlock-screen", this.onSessionActive);
-      powerMonitor.removeListener("resume", this.onSessionActive);
+      powerMonitor.removeListener("resume", this.onSystemWake);
     }
   }
 
@@ -90,9 +100,12 @@ export class IdleService {
     return Math.floor(ms / 1000);
   }
 
-  /** True when a real mouse/keyboard event landed after `epochMs` (not the watch seed). */
+  /**
+   * True when a person used the mouse or keyboard (or unlocked the screen)
+   * after `epochMs`. The watch seed and waking from sleep do not count.
+   */
   inputOccurredAfter(epochMs: number): boolean {
-    return this.watching && this.lastInputAt > epochMs;
+    return this.watching && this.lastUserInputAt > epochMs;
   }
 
   /** Milliseconds since last detected input (sub-second precision). */
@@ -142,6 +155,19 @@ export class IdleService {
     this.noteInput("os");
   };
 
+  /**
+   * Waking from sleep still counts as activity for a running timer (same as
+   * before), but not as the user coming back. The display layout can change
+   * on wake, so the cursor position is measured again from scratch.
+   */
+  private onSystemWake = () => {
+    this.lastCursor = null;
+    this.lastInputAt = Date.now();
+    // The OS idle counter can reset on an automatic wake too.
+    this.wakeGraceUntil = Date.now() + WAKE_GRACE_MS;
+    log.info("[IdleService] system woke from sleep — waiting for real input");
+  };
+
   private seedFromOsIdle() {
     try {
       const osIdle = powerMonitor.getSystemIdleTime();
@@ -182,7 +208,11 @@ export class IdleService {
       const osIdle = powerMonitor.getSystemIdleTime();
       // Require a drop of more than 1s so 0↔1 flicker is not treated as typing.
       if (this.lastOsIdle !== null && osIdle + 1 < this.lastOsIdle) {
-        this.noteInput("os");
+        if (Date.now() < this.wakeGraceUntil) {
+          this.lastInputAt = Date.now();
+        } else {
+          this.noteInput("os");
+        }
       }
       this.lastOsIdle = osIdle;
     } catch {
@@ -191,6 +221,8 @@ export class IdleService {
   }
 
   private noteInput(_kind: "mouse" | "keyboard" | "os") {
-    this.lastInputAt = Date.now();
+    const now = Date.now();
+    this.lastInputAt = now;
+    this.lastUserInputAt = now;
   }
 }

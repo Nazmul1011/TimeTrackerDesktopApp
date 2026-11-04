@@ -1,9 +1,10 @@
 /**
- * Brand mark native images — blue by default, red while timer is paused.
- * Used for tray + Windows taskbar / window icon.
+ * Brand mark native images — blue only while the timer is running.
+ * Paused and stopped use red. Used for tray + Windows taskbar / window icon.
  */
+import fs from "fs";
 import path from "path";
-import { nativeImage, type NativeImage } from "electron";
+import { app, nativeImage, type NativeImage } from "electron";
 import { findExistingPath, getResourcesRoot } from "./index";
 
 export type BrandTimerStatus = "idle" | "running" | "paused";
@@ -17,19 +18,19 @@ function brandSvgDataUrl(fill: string, size: number): string {
 }
 
 export function brandFillForStatus(status: BrandTimerStatus): string {
-  return status === "paused" ? RED : BLUE;
+  return status === "running" ? BLUE : RED;
 }
 
 function pngCandidates(status: BrandTimerStatus): string[] {
   const root = getResourcesRoot();
-  if (status === "paused") {
+  if (status !== "running") {
     return [
       path.join(root, "icons", "logo-red.png"),
       path.join(__dirname, "../../electron/assets", "logo-red.png"),
       path.join(__dirname, "../assets", "logo-red.png"),
     ];
   }
-  // Idle/running: prefer the real shipped brand mark, not a generated letter.
+  // Running: prefer the real shipped brand mark, not a generated letter.
   return [
     path.join(root, "icons", "icon.png"),
     path.join(root, "icons", "256x256.png"),
@@ -56,4 +57,43 @@ export function createBrandIcon(status: BrandTimerStatus, size: number): NativeI
   }
 
   return nativeImage.createEmpty();
+}
+
+const icoPathByKey = new Map<string, string>();
+
+/** Vista+ .ico that embeds one PNG. Windows taskbar icons must be a real .ico file. */
+function wrapPngAsIco(png: Buffer): Buffer {
+  const header = Buffer.alloc(6);
+  header.writeUInt16LE(0, 0);
+  header.writeUInt16LE(1, 2);
+  header.writeUInt16LE(1, 4);
+  const entry = Buffer.alloc(16);
+  entry.writeUInt8(0, 0);
+  entry.writeUInt8(0, 1);
+  entry.writeUInt16LE(1, 4);
+  entry.writeUInt16LE(32, 6);
+  entry.writeUInt32LE(png.length, 8);
+  entry.writeUInt32LE(6 + 16, 12);
+  return Buffer.concat([header, entry, png]);
+}
+
+/** On-disk .ico for this status. Windows will not change the taskbar button from a PNG. */
+export function ensureBrandIco(status: BrandTimerStatus): string | null {
+  const key = status === "running" ? "running" : "stopped";
+  const cached = icoPathByKey.get(key);
+  if (cached && fs.existsSync(cached)) return cached;
+
+  const image = createBrandIcon(status, 256);
+  if (image.isEmpty()) return null;
+
+  try {
+    const dir = path.join(app.getPath("userData"), "brand-icons");
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${key}.ico`);
+    fs.writeFileSync(file, wrapPngAsIco(image.toPNG()));
+    icoPathByKey.set(key, file);
+    return file;
+  } catch {
+    return null;
+  }
 }

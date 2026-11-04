@@ -4,6 +4,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { NotificationListSkeleton } from "@/components/layout/section-skeletons";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { FigmaGlyph } from "@/components/icons/figma-glyph";
@@ -228,7 +229,7 @@ export default function NotificationsPage() {
 
           <div className="scrollbar-hide h-[280px] overflow-y-auto">
             {isLoading && notifications.length === 0 ? (
-              <p className="py-6 text-center text-xs text-[var(--text-muted)]">Loading…</p>
+              <NotificationListSkeleton />
             ) : error && notifications.length === 0 ? (
               <div className="py-6 text-center">
                 <p className="text-xs text-[var(--text-muted)]">{error}</p>

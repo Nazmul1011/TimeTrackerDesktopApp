@@ -1,6 +1,6 @@
 /**
  * Home page — Figma desktop widget layout.
- * Header + Timer + Tabs (Summary / Timesheet / Screenshots).
+ * Header + Timer + Tabs (Summary / Timesheet / Day / Screenshots).
  */
 "use client";
 
@@ -12,6 +12,7 @@ import { TimerCard } from "@/components/timer/timer-card";
 import { SummaryTab } from "@/components/summary/summary-tab";
 import { TimesheetTab } from "@/components/timesheet/timesheet-tab";
 import { ScreenshotGrid } from "@/components/screenshots/screenshot-grid";
+import { DayTimeline } from "@/components/timeline/day-timeline";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ROUTES } from "@/constants/routes";
 import { HOME_TAB_EVENT } from "@/lib/notification-nav";
@@ -23,7 +24,10 @@ import { useAuthStore } from "@/store/auth.store";
 import { useTimerStore } from "@/store/timer.store";
 import { mapApiUserToUser } from "@/types";
 
-type HomeTab = "summary" | "timesheet" | "screenshots";
+type HomeTab = "summary" | "timesheet" | "timeline" | "screenshots";
+
+const tabTriggerClass =
+  "h-8 rounded-full px-1 text-[11px] font-normal shadow-none transition-colors hover:text-[#1e2939] data-[state=active]:rounded-md data-[state=active]:border data-[state=active]:border-[#ededed] data-[state=active]:bg-white data-[state=active]:text-black data-[state=inactive]:text-[#4a5565] data-[state=active]:shadow-none data-[state=inactive]:hover:bg-white/70 dark:hover:text-[#f1f5f9] dark:data-[state=active]:border-[#475569] dark:data-[state=active]:bg-[#334155] dark:data-[state=active]:text-[#f1f5f9] dark:data-[state=inactive]:text-[#94a3b8] dark:data-[state=inactive]:hover:bg-[#334155]/60";
 
 export default function HomePage() {
   const router = useRouter();
@@ -117,23 +121,17 @@ export default function HomePage() {
           onValueChange={(v) => setActiveTab(v as HomeTab)}
           className="w-full"
         >
-          <TabsList className="grid h-10 w-full grid-cols-3 rounded-lg bg-[#f5f5f5] p-1 dark:bg-[#1e293b]">
-            <TabsTrigger
-              value="summary"
-              className="h-8 rounded-full text-sm font-normal shadow-none transition-colors hover:text-[#1e2939] data-[state=active]:rounded-md data-[state=active]:border data-[state=active]:border-[#ededed] data-[state=active]:bg-white data-[state=active]:text-black data-[state=inactive]:text-[#4a5565] data-[state=active]:shadow-none data-[state=inactive]:hover:bg-white/70 dark:hover:text-[#f1f5f9] dark:data-[state=active]:border-[#475569] dark:data-[state=active]:bg-[#334155] dark:data-[state=active]:text-[#f1f5f9] dark:data-[state=inactive]:text-[#94a3b8] dark:data-[state=inactive]:hover:bg-[#334155]/60"
-            >
+          <TabsList className="grid h-10 w-full grid-cols-4 rounded-lg bg-[#f5f5f5] p-1 dark:bg-[#1e293b]">
+            <TabsTrigger value="summary" className={tabTriggerClass}>
               Summary
             </TabsTrigger>
-            <TabsTrigger
-              value="timesheet"
-              className="h-8 rounded-full text-sm font-normal shadow-none transition-colors hover:text-[#1e2939] data-[state=active]:rounded-md data-[state=active]:border data-[state=active]:border-[#ededed] data-[state=active]:bg-white data-[state=active]:text-black data-[state=inactive]:text-[#4a5565] data-[state=active]:shadow-none data-[state=inactive]:hover:bg-white/70 dark:hover:text-[#f1f5f9] dark:data-[state=active]:border-[#475569] dark:data-[state=active]:bg-[#334155] dark:data-[state=active]:text-[#f1f5f9] dark:data-[state=inactive]:text-[#94a3b8] dark:data-[state=inactive]:hover:bg-[#334155]/60"
-            >
+            <TabsTrigger value="timesheet" className={tabTriggerClass}>
               Timesheet
             </TabsTrigger>
-            <TabsTrigger
-              value="screenshots"
-              className="h-8 rounded-full text-sm font-normal shadow-none transition-colors hover:text-[#1e2939] data-[state=active]:rounded-md data-[state=active]:border data-[state=active]:border-[#ededed] data-[state=active]:bg-white data-[state=active]:text-black data-[state=inactive]:text-[#4a5565] data-[state=active]:shadow-none data-[state=inactive]:hover:bg-white/70 dark:hover:text-[#f1f5f9] dark:data-[state=active]:border-[#475569] dark:data-[state=active]:bg-[#334155] dark:data-[state=active]:text-[#f1f5f9] dark:data-[state=inactive]:text-[#94a3b8] dark:data-[state=inactive]:hover:bg-[#334155]/60"
-            >
+            <TabsTrigger value="timeline" className={tabTriggerClass}>
+              Day
+            </TabsTrigger>
+            <TabsTrigger value="screenshots" className={tabTriggerClass}>
               Screenshots
             </TabsTrigger>
           </TabsList>
@@ -143,6 +141,9 @@ export default function HomePage() {
           </TabsContent>
           <TabsContent value="timesheet" className="mt-3">
             <TimesheetTab />
+          </TabsContent>
+          <TabsContent value="timeline" className="mt-3">
+            <DayTimeline />
           </TabsContent>
           <TabsContent value="screenshots" className="mt-3">
             <ScreenshotGrid />

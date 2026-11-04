@@ -58,12 +58,10 @@ export const screenshotApi = {
   },
 
   /**
-   * One page of today's screenshots, newest first.
-   * @param timeZone org IANA zone; defaults to the active org's.
+   * One page of screenshots for a calendar day, newest first.
+   * `date` is `YYYY-MM-DD` in the org timezone.
    */
-  async listToday(page = 1, limit = 10, timeZone?: string | null) {
-    // The org's calendar day, not the device's — see lib/org-date.
-    const today = todayInZone(timeZone ?? getOrgTimezone());
+  async listDay(date: string, page = 1, limit = 10) {
     const { data } = await apiClient.get<
       ApiResponse<{
         data?: ApiScreenshot[];
@@ -73,8 +71,8 @@ export const screenshotApi = {
       }>
     >("/screenshots", {
       params: {
-        startDate: today,
-        endDate: today,
+        startDate: date,
+        endDate: date,
         page,
         limit,
       },
@@ -91,6 +89,15 @@ export const screenshotApi = {
       total,
       totalPages: payload?.meta?.totalPages ?? Math.max(1, Math.ceil(total / limit)),
     };
+  },
+
+  /**
+   * One page of today's screenshots, newest first.
+   * @param timeZone org IANA zone; defaults to the active org's.
+   */
+  async listToday(page = 1, limit = 10, timeZone?: string | null) {
+    // The org's calendar day, not the device's — see lib/org-date.
+    return this.listDay(todayInZone(timeZone ?? getOrgTimezone()), page, limit);
   },
 
   async requestDeletion(id: string) {

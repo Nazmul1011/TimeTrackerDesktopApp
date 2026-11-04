@@ -9,6 +9,8 @@ import { findExistingPath, resolveAppIconPaths } from "../utils";
 import { WindowRevealService } from "../services/window-reveal";
 import { startRendererServer } from "./renderer-server";
 import { windowBackgroundColor } from "./theme";
+import { setRendererOrigin } from "./renderer-origin";
+import { isSafeExternalUrl } from "../security/external-url";
 
 async function waitForRenderer(url: string, attempts = 40): Promise<void> {
   for (let i = 0; i < attempts; i++) {
@@ -78,7 +80,11 @@ export function createMainWindow(): BrowserWindow {
 
   // Open external links in the system browser
   win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    if (isSafeExternalUrl(url)) {
+      void shell.openExternal(url);
+    } else {
+      log.warn("[window] blocked external URL", url);
+    }
     return { action: "deny" };
   });
 
@@ -96,6 +102,7 @@ export function createMainWindow(): BrowserWindow {
         const { port } = await startRendererServer();
         startUrl = `http://127.0.0.1:${port}/home/`;
       }
+      setRendererOrigin(startUrl);
       log.info(`[window] Loading renderer: ${startUrl}`);
       await win.loadURL(startUrl);
       reveal();

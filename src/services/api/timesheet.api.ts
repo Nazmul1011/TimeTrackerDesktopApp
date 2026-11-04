@@ -60,11 +60,27 @@ export const timesheetApi = {
     return entries.reduce((sum, entry) => sum + (entry.duration ?? 0), 0);
   },
 
+  async create(payload: {
+    date: string;
+    startTime: string;
+    endTime: string;
+    projectId?: string;
+    description?: string;
+  }) {
+    const { data } = await apiClient.post<ApiResponse<unknown>>("/time-entries", {
+      ...payload,
+      reason: "Added from the day timeline",
+    });
+    return data.data;
+  },
+
   async update(
     id: string,
     payload: {
       description?: string;
       projectId?: string | null;
+      startTime?: string;
+      endTime?: string;
     },
   ) {
     const { data } = await apiClient.patch<ApiResponse<{ entry: ApiTimeEntry }>>(
